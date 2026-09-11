@@ -1,45 +1,17 @@
 name: wx_cups-web
 
 services:
-  cups:
-    image: hanxi/cups-web:latest
-    networks:
-      print_backplane:
-        aliases: [cups]
-      printer_lan: {}
-    # 延用现有 cups-web 的 USB、数据卷、CUPS 配置和驱动挂载。
-    # ports: ["1180:8080"] # 仅内网管理时启用，绝不映射到公网。
-
   wx_cups-web:
     build: ./wx_cups-web
+    network_mode: host
     environment:
-      CUPS_WEB_URL: http://cups:8080
-      CUPS_WEB_USER: wecom-gateway
-      CUPS_WEB_PASSWORD_FILE: /run/secrets/cups_web_gateway_password
-      PRINTER_URI: http://cups:631/printers/Office_A4
-      WECOM_BOT_ID: ${WECOM_BOT_ID:?请在环境中设置机器人 ID}
-      WECOM_BOT_SECRET_FILE: /run/secrets/wecom_bot_secret
+      CUPS_WEB_URL: ${CUPS_WEB_URL:-http://127.0.0.1:8080}
+      CUPS_WEB_USER: ${CUPS_WEB_USER:-wecom-gateway}
+      CUPS_WEB_PASSWORD: ${CUPS_WEB_PASSWORD:?请设置 cups-web 专用用户密码}
+      PRINTER_URI: ${PRINTER_URI:?请设置 CUPS 打印机 URI}
+      WECOM_BOT_ID: ${WECOM_BOT_ID:?请设置企业微信机器人 ID}
+      WECOM_BOT_SECRET: ${WECOM_BOT_SECRET:?请设置企业微信机器人 Secret}
       WECOM_ALLOWED_USERS: ${WECOM_ALLOWED_USERS:?请设置逗号分隔的企业微信 userid 白名单}
-    secrets:
-      - cups_web_gateway_password
-      - wecom_bot_secret
-    networks: [bot_egress, print_backplane]
     volumes:
-      - gateway-data:/app/data
+      - ./data:/app/data
     restart: unless-stopped
-    depends_on: [cups]
-
-networks:
-  print_backplane:
-    internal: true
-  bot_egress: {}
-  printer_lan: {}
-
-secrets:
-  cups_web_gateway_password:
-    file: ./secrets/cups_web_gateway_password.txt
-  wecom_bot_secret:
-    file: ./secrets/wecom_bot_secret.txt
-
-volumes:
-  gateway-data:

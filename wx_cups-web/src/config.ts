@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 export interface Config {
@@ -23,13 +22,6 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
   return value;
 }
 
-function readSecret(env: NodeJS.ProcessEnv, variable: string): string {
-  const path = required(env, variable);
-  const value = readFileSync(path, 'utf8').trim();
-  if (!value) throw new Error(`Secret 文件为空：${variable}`);
-  return value;
-}
-
 function positiveInt(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
   const raw = env[name];
   if (!raw) return fallback;
@@ -45,10 +37,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     cupsWebUrl: required(env, 'CUPS_WEB_URL').replace(/\/$/, ''),
     cupsWebUser: required(env, 'CUPS_WEB_USER'),
-    cupsWebPassword: readSecret(env, 'CUPS_WEB_PASSWORD_FILE'),
+    cupsWebPassword: required(env, 'CUPS_WEB_PASSWORD'),
     printerUri: required(env, 'PRINTER_URI'),
     wecomBotId: required(env, 'WECOM_BOT_ID'),
-    wecomBotSecret: readSecret(env, 'WECOM_BOT_SECRET_FILE'),
+    wecomBotSecret: required(env, 'WECOM_BOT_SECRET'),
     allowedUsers,
     dataDir: resolve(env.GATEWAY_DATA_DIR ?? '/app/data'),
     maxFileBytes: positiveInt(env, 'MAX_FILE_BYTES', 20 * 1024 * 1024),

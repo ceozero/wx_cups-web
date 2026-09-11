@@ -6,7 +6,7 @@ import { MessageStore } from '../src/store.js';
 import type { PrintableFile, PrinterSubmitter } from '../src/types.js';
 
 const config: Config = {
-  cupsWebUrl: 'http://cups:8080', cupsWebUser: 'wecom-gateway', cupsWebPassword: 'secret', printerUri: 'http://cups:631/printers/Office_A4',
+  cupsWebUrl: 'http://127.0.0.1:8080', cupsWebUser: 'wecom-gateway', cupsWebPassword: 'secret', printerUri: 'http://127.0.0.1:631/printers/Office_A4',
   wecomBotId: 'bot', wecomBotSecret: 'secret', allowedUsers: new Set(['alice']), dataDir: ':memory:', maxFileBytes: 1024, maxPages: 20,
   rateLimitCount: 10, rateLimitWindowMs: 600_000, requestTimeoutMs: 1000,
 };
