@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+secrets/*.txt
+.env
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
