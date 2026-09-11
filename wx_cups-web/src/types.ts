@@ -30,8 +30,33 @@ export interface PrintReceipt {
 export interface ProcessingResult {
   status: JobStatus;
   reply: string;
+  receipts?: PrintReceipt[];
 }
 
 export interface PrinterSubmitter {
   submit(file: PrintableFile): Promise<PrintReceipt>;
+}
+
+export type PendingPrintKind = 'text' | 'image' | 'file';
+
+/** 已经由用户发送、但尚未在客服菜单中确认的打印请求。 */
+export interface PendingPrint {
+  msgId: string;
+  userId: string;
+  openKfId: string;
+  kind: PendingPrintKind;
+  payload: string;
+  status: 'pending' | 'confirmed' | 'cancelled';
+  expiresAt: number;
+  createdAt: number;
+}
+
+/** 需要从 CUPS 查询最终状态的已提交任务。 */
+export interface TrackedPrintJob {
+  messageId: string;
+  userId: string;
+  openKfId: string;
+  jobId: string;
+  status: 'submitted' | 'completed' | 'failed' | 'timeout';
+  createdAt: number;
 }

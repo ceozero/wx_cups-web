@@ -30,7 +30,7 @@ export class PrintGateway {
       const description = receipts.map((item) => `#${item.jobId}${item.pages === undefined ? '' : `（${item.pages} 页）`}`).join('、');
       const reply = `已提交 CUPS 任务 ${description}。该状态仅表示任务已被接收，不代表已经出纸。`;
       this.store.transition(message.msgId, 'accepted', reply);
-      return { status: 'accepted', reply };
+      return { status: 'accepted', reply, receipts };
     } catch (error) {
       if (error instanceof SubmitUncertainError) {
         const reply = '提交状态未知，请查看打印机或 cups-web 管理后台；系统不会自动重发，以免重复出纸。';

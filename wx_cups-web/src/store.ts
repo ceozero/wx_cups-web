@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { JobStatus, StoredMessage } from './types.js';
+import type { JobStatus, PendingPrint, PendingPrintKind, StoredMessage, TrackedPrintJob } from './types.js';
 
 interface Row {
   msg_id: string;
@@ -10,6 +10,26 @@ interface Row {
   result: string | null;
   created_at: number;
   updated_at: number;
+}
+
+interface PendingPrintRow {
+  msg_id: string;
+  user_id: string;
+  open_kfid: string;
+  kind: PendingPrintKind;
+  payload: string;
+  status: PendingPrint['status'];
+  expires_at: number;
+  created_at: number;
+}
+
+interface TrackedPrintJobRow {
+  message_id: string;
+  user_id: string;
+  open_kfid: string;
+  job_id: string;
+  status: TrackedPrintJob['status'];
+  created_at: number;
 }
 
 export class MessageStore {
@@ -35,6 +55,27 @@ export class MessageStore {
         cursor TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS pending_prints (
+        msg_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        open_kfid TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        status TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS pending_prints_user_idx ON pending_prints(user_id, created_at);
+      CREATE TABLE IF NOT EXISTS tracked_print_jobs (
+        message_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        open_kfid TEXT NOT NULL,
+        job_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS tracked_print_jobs_status_idx ON tracked_print_jobs(status, created_at);
     `);
     this.recoverInterruptedMessages();
   }
@@ -76,6 +117,58 @@ export class MessageStore {
     `).run(openKfId, cursor, now);
   }
 
+  createPendingPrint(pending: Omit<PendingPrint, 'status' | 'createdAt'>, now = Date.now()): boolean {
+    const result = this.db.prepare(`
+      INSERT INTO pending_prints(msg_id, user_id, open_kfid, kind, payload, status, expires_at, created_at)
+      VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+      ON CONFLICT(msg_id) DO NOTHING
+    `).run(pending.msgId, pending.userId, pending.openKfId, pending.kind, pending.payload, pending.expiresAt, now);
+    return result.changes === 1;
+  }
+
+  /** 原子地取得确认权，避免菜单重复回调造成二次打印。 */
+  confirmPendingPrint(msgId: string, userId: string, openKfId: string, now = Date.now()): PendingPrint | undefined {
+    this.db.prepare(`
+      UPDATE pending_prints SET status = 'confirmed'
+      WHERE msg_id = ? AND user_id = ? AND open_kfid = ? AND status = 'pending' AND expires_at >= ?
+    `).run(msgId, userId, openKfId, now);
+    return this.getPendingPrint(msgId, userId, openKfId);
+  }
+
+  cancelPendingPrint(msgId: string, userId: string, openKfId: string, now = Date.now()): boolean {
+    const result = this.db.prepare(`
+      UPDATE pending_prints SET status = 'cancelled'
+      WHERE msg_id = ? AND user_id = ? AND open_kfid = ? AND status = 'pending' AND expires_at >= ?
+    `).run(msgId, userId, openKfId, now);
+    return result.changes === 1;
+  }
+
+  getPendingPrint(msgId: string, userId: string, openKfId: string): PendingPrint | undefined {
+    const row = this.db.prepare('SELECT * FROM pending_prints WHERE msg_id = ? AND user_id = ? AND open_kfid = ?')
+      .get(msgId, userId, openKfId) as PendingPrintRow | undefined;
+    return row && this.toPendingPrint(row);
+  }
+
+  trackPrintJob(job: Omit<TrackedPrintJob, 'status' | 'createdAt'>, now = Date.now()): void {
+    this.db.prepare(`
+      INSERT INTO tracked_print_jobs(message_id, user_id, open_kfid, job_id, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'submitted', ?, ?)
+      ON CONFLICT(message_id) DO NOTHING
+    `).run(job.messageId, job.userId, job.openKfId, job.jobId, now, now);
+  }
+
+  listSubmittedPrintJobs(): TrackedPrintJob[] {
+    const rows = this.db.prepare("SELECT * FROM tracked_print_jobs WHERE status = 'submitted' ORDER BY created_at ASC")
+      .all() as unknown as TrackedPrintJobRow[];
+    return rows.map((row) => this.toTrackedPrintJob(row));
+  }
+
+  finishTrackedPrintJob(messageId: string, status: Exclude<TrackedPrintJob['status'], 'submitted'>, now = Date.now()): boolean {
+    const result = this.db.prepare("UPDATE tracked_print_jobs SET status = ?, updated_at = ? WHERE message_id = ? AND status = 'submitted'")
+      .run(status, now, messageId);
+    return result.changes === 1;
+  }
+
   close(): void {
     this.db.close();
   }
@@ -94,5 +187,19 @@ export class MessageStore {
 
   private toMessage(row: Row): StoredMessage {
     return { msgId: row.msg_id, userId: row.user_id, status: row.status, result: row.result ?? undefined, createdAt: row.created_at, updatedAt: row.updated_at };
+  }
+
+  private toPendingPrint(row: PendingPrintRow): PendingPrint {
+    return {
+      msgId: row.msg_id, userId: row.user_id, openKfId: row.open_kfid, kind: row.kind, payload: row.payload,
+      status: row.status, expiresAt: row.expires_at, createdAt: row.created_at,
+    };
+  }
+
+  private toTrackedPrintJob(row: TrackedPrintJobRow): TrackedPrintJob {
+    return {
+      messageId: row.message_id, userId: row.user_id, openKfId: row.open_kfid, jobId: row.job_id,
+      status: row.status, createdAt: row.created_at,
+    };
   }
 }

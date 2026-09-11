@@ -12,7 +12,7 @@ export interface KfMessage {
   /** 3=微信客户消息，4=系统事件，5=企业微信接待人员消息。 */
   origin?: number;
   msgtype: string;
-  text?: { content?: string };
+  text?: { content?: string; menu_id?: string };
   image?: { media_id?: string };
   file?: { media_id?: string };
 }
@@ -54,6 +54,21 @@ export class WecomKfClient {
       open_kfid: openKfId,
       msgtype: 'text',
       text: { content: content.slice(0, 2048) },
+    });
+  }
+
+  async sendPrintConfirmationMenu(openKfId: string, externalUserId: string, confirmId: string, cancelId: string): Promise<void> {
+    await this.post('kf/send_msg', {
+      touser: externalUserId,
+      open_kfid: openKfId,
+      msgtype: 'msgmenu',
+      msgmenu: {
+        head_content: '已收到打印内容。请确认是否提交打印：',
+        list: [
+          { type: 'click', click: { id: confirmId, content: '确认打印' } },
+          { type: 'click', click: { id: cancelId, content: '取消' } },
+        ],
+      },
     });
   }
 

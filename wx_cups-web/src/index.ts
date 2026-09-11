@@ -10,10 +10,12 @@ const config = loadConfig();
 const store = new MessageStore(config.dataDir);
 const kfGateway = new WecomKfGateway(config, store, new PrintGateway(config, store, new CupsWebClient(config)), new WecomKfClient(config));
 const server = await startHttpServer(config, kfGateway);
+kfGateway.startBackgroundWorkers();
 
 function shutdown(signal: string): void {
   console.info(JSON.stringify({ level: 'info', event: 'shutdown', signal }));
   server.close(() => {
+    kfGateway.stopBackgroundWorkers();
     store.close();
     process.exit(0);
   });

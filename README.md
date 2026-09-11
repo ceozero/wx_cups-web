@@ -36,6 +36,12 @@ docker compose up -d --build
 
 网关使用 host 网络，通过 `127.0.0.1:1180` 访问独立运行的 cups-web；如需其他地址，设置 `CUPS_WEB_URL`。SQLite 数据保存到项目的 `./data`。
 
+## 打印确认与回执
+
+- 用户发送文字、图片或文件后，网关先发送“确认打印 / 取消”菜单；只有点击“确认打印”后才会下载文件并提交 CUPS。
+- 提交后立即回复 CUPS 任务编号，随后直接查询 CUPS 的 IPP `job-state`；状态变为 `completed` 时再回复“CUPS 已完成任务”。该状态以 CUPS 为准，仍应以实际出纸为准。
+- 确认菜单默认 10 分钟有效；CUPS 状态每 5 秒查询一次，最多查询 10 分钟。可按需设置：`PRINT_CONFIRMATION_TTL_MS`、`PRINT_STATUS_POLL_MS`、`PRINT_STATUS_TIMEOUT_MS`。
+
 首次部署时，若日志报 `unable to open database file`，请在 Compose 文件目录执行：
 
 ```bash

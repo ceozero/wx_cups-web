@@ -19,6 +19,9 @@ export interface Config {
   rateLimitCount: number;
   rateLimitWindowMs: number;
   requestTimeoutMs: number;
+  printConfirmationTtlMs: number;
+  printStatusPollMs: number;
+  printStatusTimeoutMs: number;
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -68,5 +71,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     rateLimitCount: positiveInt(env, 'RATE_LIMIT_COUNT', 10),
     rateLimitWindowMs: positiveInt(env, 'RATE_LIMIT_WINDOW_MS', 10 * 60 * 1000),
     requestTimeoutMs: positiveInt(env, 'CUPS_REQUEST_TIMEOUT_MS', 30 * 1000),
+    printConfirmationTtlMs: positiveInt(env, 'PRINT_CONFIRMATION_TTL_MS', 10 * 60 * 1000),
+    printStatusPollMs: positiveInt(env, 'PRINT_STATUS_POLL_MS', 5 * 1000),
+    printStatusTimeoutMs: positiveInt(env, 'PRINT_STATUS_TIMEOUT_MS', 10 * 60 * 1000),
   };
 }

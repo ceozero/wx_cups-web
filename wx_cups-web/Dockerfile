@@ -11,7 +11,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends gosu \
+  && apt-get install -y --no-install-recommends gosu ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && npm ci --omit=dev --ignore-scripts \
   && npm cache clean --force
