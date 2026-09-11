@@ -30,6 +30,11 @@ export class MessageStore {
         updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS messages_user_created_idx ON messages(user_id, created_at);
+      CREATE TABLE IF NOT EXISTS kf_cursors (
+        open_kfid TEXT PRIMARY KEY,
+        cursor TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
     this.recoverInterruptedMessages();
   }
@@ -57,6 +62,18 @@ export class MessageStore {
   countRecentForUser(userId: string, since: number): number {
     const row = this.db.prepare('SELECT COUNT(*) AS count FROM messages WHERE user_id = ? AND created_at >= ?').get(userId, since) as { count: number };
     return row.count;
+  }
+
+  getKfCursor(openKfId: string): string | undefined {
+    const row = this.db.prepare('SELECT cursor FROM kf_cursors WHERE open_kfid = ?').get(openKfId) as { cursor: string } | undefined;
+    return row?.cursor;
+  }
+
+  setKfCursor(openKfId: string, cursor: string, now = Date.now()): void {
+    this.db.prepare(`
+      INSERT INTO kf_cursors(open_kfid, cursor, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(open_kfid) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at
+    `).run(openKfId, cursor, now);
   }
 
   close(): void {

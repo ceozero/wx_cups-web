@@ -5,9 +5,14 @@ export interface Config {
   cupsWebUser: string;
   cupsWebPassword: string;
   printerUri: string;
-  wecomBotId: string;
-  wecomBotSecret: string;
-  allowedUsers: Set<string>;
+  wecomCorpId: string;
+  wecomKfSecret: string;
+  wecomCallbackToken: string;
+  wecomCallbackEncodingAesKey: string;
+  wecomCallbackHost: string;
+  wecomCallbackPort: number;
+  openKfIds: Set<string>;
+  allowedExternalUsers: Set<string>;
   dataDir: string;
   maxFileBytes: number;
   maxPages: number;
@@ -30,18 +35,33 @@ function positiveInt(env: NodeJS.ProcessEnv, name: string, fallback: number): nu
   return value;
 }
 
+function callbackAesKey(env: NodeJS.ProcessEnv): string {
+  const value = required(env, 'WECOM_CALLBACK_ENCODING_AES_KEY');
+  if (!/^[A-Za-z0-9]{43}$/.test(value) || Buffer.from(`${value}=`, 'base64').length !== 32) {
+    throw new Error('WECOM_CALLBACK_ENCODING_AES_KEY 必须是企业微信提供的 43 位密钥');
+  }
+  return value;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const allowedUsers = new Set(required(env, 'WECOM_ALLOWED_USERS').split(',').map((item) => item.trim()).filter(Boolean));
-  if (!allowedUsers.size) throw new Error('WECOM_ALLOWED_USERS 不能为空，禁止默认放行所有成员');
+  const openKfIds = new Set(required(env, 'WECOM_OPEN_KF_IDS').split(',').map((item) => item.trim()).filter(Boolean));
+  const allowedExternalUsers = new Set(required(env, 'WECOM_ALLOWED_EXTERNAL_USERS').split(',').map((item) => item.trim()).filter(Boolean));
+  if (!openKfIds.size) throw new Error('WECOM_OPEN_KF_IDS 不能为空，禁止处理未授权客服账号');
+  if (!allowedExternalUsers.size) throw new Error('WECOM_ALLOWED_EXTERNAL_USERS 不能为空，禁止默认放行所有微信用户');
 
   return {
     cupsWebUrl: required(env, 'CUPS_WEB_URL').replace(/\/$/, ''),
     cupsWebUser: required(env, 'CUPS_WEB_USER'),
     cupsWebPassword: required(env, 'CUPS_WEB_PASSWORD'),
     printerUri: required(env, 'PRINTER_URI'),
-    wecomBotId: required(env, 'WECOM_BOT_ID'),
-    wecomBotSecret: required(env, 'WECOM_BOT_SECRET'),
-    allowedUsers,
+    wecomCorpId: required(env, 'WECOM_CORP_ID'),
+    wecomKfSecret: required(env, 'WECOM_KF_SECRET'),
+    wecomCallbackToken: required(env, 'WECOM_CALLBACK_TOKEN'),
+    wecomCallbackEncodingAesKey: callbackAesKey(env),
+    wecomCallbackHost: env.WECOM_CALLBACK_HOST?.trim() || '0.0.0.0',
+    wecomCallbackPort: positiveInt(env, 'WECOM_CALLBACK_PORT', 3000),
+    openKfIds,
+    allowedExternalUsers,
     dataDir: resolve(env.GATEWAY_DATA_DIR ?? '/app/data'),
     maxFileBytes: positiveInt(env, 'MAX_FILE_BYTES', 20 * 1024 * 1024),
     maxPages: positiveInt(env, 'MAX_PAGES', 20),

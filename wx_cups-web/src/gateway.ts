@@ -15,7 +15,7 @@ export class PrintGateway {
   async process(message: IncomingMessage): Promise<ProcessingResult> {
     const reserved = this.store.reserve(message.msgId, message.userId);
     if (!reserved.created) return duplicateReply(reserved.message);
-    if (!this.config.allowedUsers.has(message.userId)) return this.reject(message.msgId, '无打印权限，请联系管理员开通白名单');
+    if (!this.config.allowedExternalUsers.has(message.userId)) return this.reject(message.msgId, '无打印权限，请联系管理员开通白名单');
     if (this.store.countRecentForUser(message.userId, Date.now() - this.config.rateLimitWindowMs) > this.config.rateLimitCount) return this.reject(message.msgId, '请求过于频繁，请稍后再试');
 
     try {

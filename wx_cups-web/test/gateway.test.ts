@@ -7,7 +7,9 @@ import type { PrintableFile, PrinterSubmitter } from '../src/types.js';
 
 const config: Config = {
   cupsWebUrl: 'http://127.0.0.1:8080', cupsWebUser: 'wecom-gateway', cupsWebPassword: 'secret', printerUri: 'http://127.0.0.1:631/printers/Office_A4',
-  wecomBotId: 'bot', wecomBotSecret: 'secret', allowedUsers: new Set(['alice']), dataDir: ':memory:', maxFileBytes: 1024, maxPages: 20,
+  wecomCorpId: 'ww123', wecomKfSecret: 'kf-secret', wecomCallbackToken: 'callback-token',
+  wecomCallbackEncodingAesKey: 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG', wecomCallbackHost: '127.0.0.1', wecomCallbackPort: 3000,
+  openKfIds: new Set(['wk123']), allowedExternalUsers: new Set(['alice']), dataDir: ':memory:', maxFileBytes: 1024, maxPages: 20,
   rateLimitCount: 10, rateLimitWindowMs: 600_000, requestTimeoutMs: 1000,
 };
 
@@ -49,5 +51,13 @@ test('非白名单成员在下载文件前被拒绝', async () => {
   const result = await gateway.process({ msgId: 'm-denied', userId: 'mallory', loadFiles: async () => { downloaded = true; return [textFile()]; } });
   assert.equal(result.status, 'rejected');
   assert.equal(downloaded, false);
+  store.close();
+});
+
+test('保存并读取微信客服消息游标', () => {
+  const store = new MessageStore(':memory:');
+  assert.equal(store.getKfCursor('wk-1'), undefined);
+  store.setKfCursor('wk-1', 'cursor-1');
+  assert.equal(store.getKfCursor('wk-1'), 'cursor-1');
   store.close();
 });
