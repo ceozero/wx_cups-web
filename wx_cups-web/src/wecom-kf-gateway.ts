@@ -149,7 +149,7 @@ export class WecomKfGateway {
     const created = this.store.createPendingPrint({ ...pending, expiresAt: Date.now() + this.config.printConfirmationTtlMs });
     if (!created) return; // 微信客服重复投递时不重复发送菜单。
     try {
-      await this.kf.sendPrintConfirmationMenu(message.open_kfid, message.external_userid!, confirmId, cancelId);
+      await this.kf.sendPrintConfirmationMenu(message.open_kfid, message.external_userid!, confirmId, cancelId, message.msgid);
     } catch (error) {
       console.error(JSON.stringify({ level: 'warn', event: 'wecom_kf_confirmation_menu_failed', msgId: message.msgid, error: errorDetail(error) }));
     }
@@ -204,7 +204,7 @@ export class WecomKfGateway {
 
   private async safeSendText(openKfId: string, externalUserId: string, content: string, msgId: string): Promise<void> {
     try {
-      await this.kf.sendText(openKfId, externalUserId, content);
+      await this.kf.sendText(openKfId, externalUserId, content, msgId);
     } catch (error) {
       // 客服通道对每位用户有 48 小时窗口和 5 条限制；失败不能中断打印或导致进程退出。
       console.error(JSON.stringify({ level: 'warn', event: 'wecom_kf_reply_failed', msgId, error: errorDetail(error) }));

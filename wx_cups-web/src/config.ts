@@ -22,6 +22,8 @@ export interface Config {
   printConfirmationTtlMs: number;
   printStatusPollMs: number;
   printStatusTimeoutMs: number;
+  wecomApiMaxRetries: number;
+  wecomApiRetryBaseMs: number;
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -35,6 +37,14 @@ function positiveInt(env: NodeJS.ProcessEnv, name: string, fallback: number): nu
   if (!raw) return fallback;
   const value = Number.parseInt(raw, 10);
   if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${name} 必须是正整数`);
+  return value;
+}
+
+function nonNegativeInt(env: NodeJS.ProcessEnv, name: string, fallback: number, maximum: number): number {
+  const raw = env[name];
+  if (!raw) return fallback;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(value) || value < 0 || value > maximum) throw new Error(`${name} 必须是 0 到 ${maximum} 的整数`);
   return value;
 }
 
@@ -74,5 +84,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     printConfirmationTtlMs: positiveInt(env, 'PRINT_CONFIRMATION_TTL_MS', 10 * 60 * 1000),
     printStatusPollMs: positiveInt(env, 'PRINT_STATUS_POLL_MS', 5 * 1000),
     printStatusTimeoutMs: positiveInt(env, 'PRINT_STATUS_TIMEOUT_MS', 10 * 60 * 1000),
+    wecomApiMaxRetries: nonNegativeInt(env, 'WECOM_API_MAX_RETRIES', 2, 5),
+    wecomApiRetryBaseMs: positiveInt(env, 'WECOM_API_RETRY_BASE_MS', 500),
   };
 }

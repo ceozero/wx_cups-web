@@ -19,6 +19,8 @@ test('从直接环境变量读取微信客服与 cups-web 凭据', () => {
   assert.equal(config.cupsWebPassword, 'cups-password');
   assert.equal(config.wecomKfSecret, 'kf-secret');
   assert.deepEqual([...config.allowedExternalUsers], ['wmAlice', 'wmBob']);
+  assert.equal(config.wecomApiMaxRetries, 2);
+  assert.equal(config.wecomApiRetryBaseMs, 500);
 });
 
 test('拒绝格式错误的微信客服回调密钥', () => {
