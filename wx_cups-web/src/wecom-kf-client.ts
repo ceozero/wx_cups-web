@@ -83,18 +83,28 @@ export class WecomKfClient {
     });
   }
 
-  async sendPrintConfirmationMenu(openKfId: string, externalUserId: string, confirmId: string, cancelId: string, messageKey: string): Promise<void> {
+  async sendPrintConfirmationMenu(openKfId: string, externalUserId: string, confirmId: string, messageKey: string): Promise<void> {
     await this.post('kf/send_msg', {
       touser: externalUserId,
       open_kfid: openKfId,
-      msgid: stableWecomMessageId(`menu:${messageKey}`),
+      msgid: stableWecomMessageId(`menu-confirm:${messageKey}`),
       msgtype: 'msgmenu',
       msgmenu: {
         head_content: '已收到打印内容，请确认是否打印：',
-        list: [
-          { type: 'click', click: { id: confirmId, content: '确认打印' } },
-          { type: 'click', click: { id: cancelId, content: '取消' } },
-        ],
+        list: [{ type: 'click', click: { id: confirmId, content: '确认打印' } }],
+      },
+    });
+  }
+
+  async sendPrintCancellationMenu(openKfId: string, externalUserId: string, cancelId: string, messageKey: string): Promise<void> {
+    await this.post('kf/send_msg', {
+      touser: externalUserId,
+      open_kfid: openKfId,
+      msgid: stableWecomMessageId(`menu-cancel:${messageKey}`),
+      msgtype: 'msgmenu',
+      msgmenu: {
+        head_content: '──────────',
+        list: [{ type: 'click', click: { id: cancelId, content: '取消' } }],
       },
     });
   }
@@ -105,7 +115,7 @@ export class WecomKfClient {
       const result = await axios.get<ArrayBuffer>(`${API_BASE_URL}/media/get`, {
         params: { access_token: accessToken, media_id: mediaId },
         responseType: 'arraybuffer',
-        timeout: this.config.requestTimeoutMs,
+        timeout: this.config.wecomApiRequestTimeoutMs,
         maxContentLength: this.config.maxFileBytes,
         validateStatus: () => true,
       });
@@ -129,7 +139,7 @@ export class WecomKfClient {
       const accessToken = await this.getAccessToken();
       const response = await axios.post<T & ApiResponse>(`${API_BASE_URL}/${path}`, payload, {
         params: { access_token: accessToken },
-        timeout: this.config.requestTimeoutMs,
+        timeout: this.config.wecomApiRequestTimeoutMs,
       });
       if (response.data.errcode !== 0) {
         if ([40001, 40014, 42001].includes(response.data.errcode)) this.accessToken = undefined;
@@ -145,7 +155,7 @@ export class WecomKfClient {
       this.accessTokenInFlight = this.withRetry('获取微信客服 access_token', async () => {
         const response = await axios.get<ApiResponse & { access_token?: string; expires_in?: number }>(`${API_BASE_URL}/gettoken`, {
           params: { corpid: this.config.wecomCorpId, corpsecret: this.config.wecomKfSecret },
-          timeout: this.config.requestTimeoutMs,
+          timeout: this.config.wecomApiRequestTimeoutMs,
         });
         if (response.data.errcode !== 0 || !response.data.access_token || !response.data.expires_in) throw apiError('获取微信客服 access_token', response.data);
         this.accessToken = { value: response.data.access_token, expiresAt: Date.now() + (response.data.expires_in - 120) * 1000 };

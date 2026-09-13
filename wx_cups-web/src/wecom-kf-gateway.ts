@@ -153,7 +153,8 @@ export class WecomKfGateway {
     const created = this.store.createPendingPrint({ ...pending, expiresAt: Date.now() + this.config.printConfirmationTtlMs });
     if (!created) return; // 微信客服重复投递时不重复发送菜单。
     try {
-      await this.kf.sendPrintConfirmationMenu(message.open_kfid, message.external_userid!, confirmId, cancelId, message.msgid);
+      await this.kf.sendPrintConfirmationMenu(message.open_kfid, message.external_userid!, confirmId, message.msgid);
+      await this.kf.sendPrintCancellationMenu(message.open_kfid, message.external_userid!, cancelId, message.msgid);
     } catch (error) {
       console.error(JSON.stringify({ level: 'warn', event: 'wecom_kf_confirmation_menu_failed', msgId: message.msgid, error: errorDetail(error) }));
     }
