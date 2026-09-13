@@ -106,7 +106,7 @@ test('连续发送内容时菜单展示整个批次，旧菜单不能只确认�
   (gateway as unknown as { kf: WecomKfClient }).kf = latestClient;
   await gateway.syncFromCallback('wk-1', 'callback-latest-token');
   assert.equal(submissions, 2);
-  assert.match(taskMenus.at(-1)!, /本批次已处理 2 个内容/);
+  assert.match(taskMenus.at(-1)!, /^已提交 CUPS 打印任务 1（1 页）、2（1 页）。该状态仅表示任务已被接收，不代表已经出纸。$/);
   (gateway as unknown as { statusClient: { getStatus: () => Promise<'completed'> } }).statusClient = { getStatus: async () => 'completed' };
   await gateway.pollPrintJobs();
   assert.equal(taskMenus.length, 2);

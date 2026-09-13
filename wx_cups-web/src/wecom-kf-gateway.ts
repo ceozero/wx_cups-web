@@ -72,6 +72,14 @@ function taskNotificationContent(kind: TaskNotificationKind, jobIds: string[]): 
   return `CUPS 打印任务 ${jobs} 在限定时间内未确认完成，请查看打印机或 cups-web 管理后台。`;
 }
 
+function acceptedBatchReply(results: Array<{ result: Awaited<ReturnType<PrintGateway['process']>> }>): string | undefined {
+  if (results.length < 2 || !results.every((item) => item.result.status === 'accepted')) return undefined;
+  const receipts = results.flatMap((item) => item.result.receipts ?? []);
+  if (receipts.length !== results.length) return undefined;
+  const jobs = receipts.map((receipt) => `${displayJobId(String(receipt.jobId))}${receipt.pages === undefined ? '' : `（${receipt.pages} 页）`}`);
+  return `已提交 CUPS 打印任务 ${jobs.join('、')}。该状态仅表示任务已被接收，不代表已经出纸。`;
+}
+
 /** 企业微信客服回调只负责唤醒；具体消息由 sync_msg 拉取。 */
 export class WecomKfGateway {
   private readonly syncInFlight = new Map<string, Promise<void>>();
@@ -258,7 +266,8 @@ export class WecomKfGateway {
           });
         }
       }
-      const reply = results.length === 1 ? results[0].result.reply : `本批次已处理 ${results.length} 个内容：\n${results.map((item, index) => `${index + 1}. ${item.result.reply}`).join('\n')}`;
+      const reply = acceptedBatchReply(results)
+        ?? (results.length === 1 ? results[0].result.reply : `本批次已处理 ${results.length} 个内容：\n${results.map((item, index) => `${index + 1}. ${item.result.reply}`).join('\n')}`);
       if (results.some((item) => item.result.status === 'accepted' || item.result.status === 'uncertain')) {
         await this.safeTaskReply(message.open_kfid, message.external_userid!, reply, selection.msgId);
       } else {
