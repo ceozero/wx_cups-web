@@ -147,21 +147,58 @@ export class MessageStore {
     return result.changes === 1;
   }
 
-  /** 原子地取得确认权，避免菜单重复回调造成二次打印。 */
-  confirmPendingPrint(msgId: string, userId: string, openKfId: string, now = Date.now()): PendingPrint | undefined {
-    this.db.prepare(`
-      UPDATE pending_prints SET status = 'confirmed'
-      WHERE msg_id = ? AND user_id = ? AND open_kfid = ? AND status = 'pending' AND expires_at >= ?
-    `).run(msgId, userId, openKfId, now);
-    return this.getPendingPrint(msgId, userId, openKfId);
+  /** 当前用户尚未确认且未过期的内容，按接收顺序组成一个确认批次。 */
+  listActivePendingPrints(userId: string, openKfId: string, now = Date.now()): PendingPrint[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM pending_prints
+      WHERE user_id = ? AND open_kfid = ? AND status = 'pending' AND expires_at >= ?
+      ORDER BY created_at ASC, msg_id ASC
+    `).all(userId, openKfId, now) as unknown as PendingPrintRow[];
+    return rows.map((row) => this.toPendingPrint(row));
   }
 
-  cancelPendingPrint(msgId: string, userId: string, openKfId: string, now = Date.now()): boolean {
-    const result = this.db.prepare(`
-      UPDATE pending_prints SET status = 'cancelled'
-      WHERE msg_id = ? AND user_id = ? AND open_kfid = ? AND status = 'pending' AND expires_at >= ?
-    `).run(msgId, userId, openKfId, now);
-    return result.changes === 1;
+  /**
+   * 仅最新一条确认菜单可以操作当前批次。旧菜单在客户继续发送内容后自动失效，
+   * 以免菜单上显示 1 个内容却只提交了部分内容。
+   */
+  confirmPendingPrintBatch(latestMsgId: string, userId: string, openKfId: string, now = Date.now()): PendingPrint[] | undefined {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const pending = this.listActivePendingPrints(userId, openKfId, now);
+      if (!pending.length || pending.at(-1)!.msgId !== latestMsgId) {
+        this.db.exec('COMMIT');
+        return undefined;
+      }
+      this.db.prepare(`
+        UPDATE pending_prints SET status = 'confirmed'
+        WHERE user_id = ? AND open_kfid = ? AND status = 'pending' AND expires_at >= ?
+      `).run(userId, openKfId, now);
+      this.db.exec('COMMIT');
+      return pending;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  cancelPendingPrintBatch(latestMsgId: string, userId: string, openKfId: string, now = Date.now()): boolean {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const pending = this.listActivePendingPrints(userId, openKfId, now);
+      if (!pending.length || pending.at(-1)!.msgId !== latestMsgId) {
+        this.db.exec('COMMIT');
+        return false;
+      }
+      this.db.prepare(`
+        UPDATE pending_prints SET status = 'cancelled'
+        WHERE user_id = ? AND open_kfid = ? AND status = 'pending' AND expires_at >= ?
+      `).run(userId, openKfId, now);
+      this.db.exec('COMMIT');
+      return true;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   getPendingPrint(msgId: string, userId: string, openKfId: string): PendingPrint | undefined {

@@ -83,16 +83,16 @@ export class WecomKfClient {
     });
   }
 
-  async sendPrintConfirmationMenu(openKfId: string, externalUserId: string, confirmId: string, cancelId: string, messageKey: string): Promise<void> {
+  async sendPrintConfirmationMenu(openKfId: string, externalUserId: string, content: string, confirmId: string, cancelId: string, count: number, messageKey: string): Promise<void> {
     await this.post('kf/send_msg', {
       touser: externalUserId,
       open_kfid: openKfId,
       msgid: stableWecomMessageId(`menu-confirm:${messageKey}`),
       msgtype: 'msgmenu',
       msgmenu: {
-        head_content: '已收到打印内容，请确认是否打印：',
+        head_content: content.slice(0, 1024),
         list: [
-          { type: 'click', click: { id: confirmId, content: '确认打印' } },
+          { type: 'click', click: { id: confirmId, content: `确认打印 ${count} 个内容` } },
           { type: 'click', click: { id: cancelId, content: '取消' } },
         ],
       },

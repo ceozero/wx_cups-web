@@ -38,6 +38,23 @@ function historyTime(timestamp: number): string {
   }).format(new Date(timestamp)).replace(/\//g, '/');
 }
 
+function pendingName(pending: PendingPrint, imageIndex: number, fileIndex: number): string {
+  if (pending.kind === 'text') return textFilename(pending.payload);
+  // 微信客服回调不会携带媒体原始文件名；未确认前不下载媒体，只显示明确的类型与序号。
+  return pending.kind === 'image' ? `图片_${String(imageIndex).padStart(2, '0')}` : `文件_${String(fileIndex).padStart(2, '0')}`;
+}
+
+function confirmationContent(pending: PendingPrint[]): string {
+  let imageIndex = 0;
+  let fileIndex = 0;
+  const lines = pending.map((item, index) => {
+    if (item.kind === 'image') imageIndex += 1;
+    if (item.kind === 'file') fileIndex += 1;
+    return `${index + 1}. ${pendingName(item, imageIndex, fileIndex)}`;
+  });
+  return `已收到打印内容，请确认是否打印：\n${lines.join('\n')}\n如需打印更多，继续发送打印内容`;
+}
+
 /** 企业微信客服回调只负责唤醒；具体消息由 sync_msg 拉取。 */
 export class WecomKfGateway {
   private readonly syncInFlight = new Map<string, Promise<void>>();
@@ -163,16 +180,18 @@ export class WecomKfGateway {
       await this.safeReply(message, '无打印权限，请联系管理员开通白名单。');
       return;
     }
-    const confirmId = menuId('confirm', message.msgid);
-    const cancelId = menuId('cancel', message.msgid);
+    const created = this.store.createPendingPrint({ ...pending, expiresAt: Date.now() + this.config.printConfirmationTtlMs });
+    if (!created) return; // 微信客服重复投递时不重复发送菜单。
+    const batch = this.store.listActivePendingPrints(message.external_userid!, message.open_kfid);
+    const latest = batch.at(-1);
+    const confirmId = latest && menuId('confirm', latest.msgId);
+    const cancelId = latest && menuId('cancel', latest.msgId);
     if (!confirmId || !cancelId) {
       await this.safeReply(message, '该消息无法生成确认操作，请重新发送。');
       return;
     }
-    const created = this.store.createPendingPrint({ ...pending, expiresAt: Date.now() + this.config.printConfirmationTtlMs });
-    if (!created) return; // 微信客服重复投递时不重复发送菜单。
     try {
-      await this.kf.sendPrintConfirmationMenu(message.open_kfid, message.external_userid!, confirmId, cancelId, message.msgid);
+      await this.kf.sendPrintConfirmationMenu(message.open_kfid, message.external_userid!, confirmationContent(batch), confirmId, cancelId, batch.length, latest.msgId);
     } catch (error) {
       console.error(JSON.stringify({ level: 'warn', event: 'wecom_kf_confirmation_menu_failed', msgId: message.msgid, error: errorDetail(error) }));
     }
@@ -182,34 +201,39 @@ export class WecomKfGateway {
     const userId = message.external_userid!;
     const openKfId = message.open_kfid;
     if (selection.action === 'cancel') {
-      const cancelled = this.store.cancelPendingPrint(selection.msgId, userId, openKfId);
-      await this.safeReply(message, cancelled ? '已取消，本次内容不会打印。' : '该确认已失效或已处理。');
+      const cancelled = this.store.cancelPendingPrintBatch(selection.msgId, userId, openKfId);
+      await this.safeReply(message, cancelled ? '已取消，本批次内容不会打印。' : '该确认已失效，请使用最新的确认菜单。');
       return;
     }
-    const pending = this.store.confirmPendingPrint(selection.msgId, userId, openKfId);
-    if (!pending || pending.status === 'cancelled' || pending.expiresAt < Date.now()) {
-      await this.safeReply(message, '该确认已失效，请重新发送需要打印的内容。');
+    const pending = this.store.confirmPendingPrintBatch(selection.msgId, userId, openKfId);
+    if (!pending) {
+      await this.safeReply(message, '该确认已失效，请使用最新的确认菜单。');
       return;
     }
     try {
-      const result = await this.printGateway.process(this.toIncoming(pending));
-      if (result.status === 'accepted' && result.receipts?.length === 1) {
-        this.store.trackPrintJob({ messageId: pending.msgId, userId: pending.userId, openKfId: pending.openKfId, jobId: String(result.receipts[0].jobId) });
-        this.store.addPrintHistory({
-          messageId: pending.msgId, userId: pending.userId, filename: result.receipts[0].filename ?? '未知文件',
-          jobId: String(result.receipts[0].jobId), pages: result.receipts[0].pages,
-        });
+      const results = [] as Array<{ pending: PendingPrint; result: Awaited<ReturnType<PrintGateway['process']>> }>;
+      for (const item of pending) {
+        const result = await this.printGateway.process(this.toIncoming(item));
+        results.push({ pending: item, result });
+        if (result.status === 'accepted' && result.receipts?.length === 1) {
+          this.store.trackPrintJob({ messageId: item.msgId, userId: item.userId, openKfId: item.openKfId, jobId: String(result.receipts[0].jobId) });
+          this.store.addPrintHistory({
+            messageId: item.msgId, userId: item.userId, filename: result.receipts[0].filename ?? '未知文件',
+            jobId: String(result.receipts[0].jobId), pages: result.receipts[0].pages,
+          });
+        }
       }
-      if (result.status === 'accepted' || result.status === 'uncertain') {
-        await this.safeTaskReply(message.open_kfid, message.external_userid!, result.reply, pending.msgId);
+      const reply = results.length === 1 ? results[0].result.reply : `本批次已处理 ${results.length} 个内容：\n${results.map((item, index) => `${index + 1}. ${item.result.reply}`).join('\n')}`;
+      if (results.some((item) => item.result.status === 'accepted' || item.result.status === 'uncertain')) {
+        await this.safeTaskReply(message.open_kfid, message.external_userid!, reply, selection.msgId);
       } else {
-        await this.safeReply(message, result.reply);
+        await this.safeReply(message, reply);
       }
-      if (result.status === 'accepted' && result.receipts?.length === 1) {
+      if (results.some((item) => item.result.status === 'accepted' && item.result.receipts?.length === 1)) {
         await this.pollPrintJobs();
       }
     } catch (error) {
-      console.error(JSON.stringify({ level: 'error', event: 'wecom_kf_processing_failed', msgId: pending.msgId, error: errorDetail(error) }));
+      console.error(JSON.stringify({ level: 'error', event: 'wecom_kf_processing_failed', msgId: selection.msgId, error: errorDetail(error) }));
       await this.safeReply(message, '处理失败，请稍后重试。');
     }
   }
