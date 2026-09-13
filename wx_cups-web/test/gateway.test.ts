@@ -30,6 +30,15 @@ test('同一 msgid 只提交一次且返回原结果', async () => {
   store.close();
 });
 
+test('客服回执只显示 CUPS 作业编号，不暴露内部 IPP URI', async () => {
+  const store = new MessageStore(':memory:');
+  const gateway = new PrintGateway(config, store, { submit: async () => ({ jobId: 'ipp://127.0.0.1:631/jobs/6', pages: 1 }) });
+  const result = await gateway.process({ msgId: 'm-job-uri', userId: 'alice', loadFiles: async () => [textFile()] });
+  assert.match(result.reply, /打印任务 6（1 页）/);
+  assert.doesNotMatch(result.reply, /ipp:\/\//);
+  store.close();
+});
+
 test('网络中断记录为 uncertain 并且不自动重发', async () => {
   let submits = 0;
   const printer: PrinterSubmitter = { submit: async () => { submits += 1; const { SubmitUncertainError } = await import('../src/cups-client.js'); throw new SubmitUncertainError('timeout'); } };

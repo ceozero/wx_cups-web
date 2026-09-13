@@ -22,6 +22,10 @@ function parseMenuId(value: string | undefined): { action: 'confirm' | 'cancel';
   return match ? { action: match[1] as 'confirm' | 'cancel', msgId: match[2] } : undefined;
 }
 
+function displayJobId(jobId: string): string {
+  return /\/jobs\/(\d+)$/.exec(jobId)?.[1] ?? jobId;
+}
+
 /** 企业微信客服回调只负责唤醒；具体消息由 sync_msg 拉取。 */
 export class WecomKfGateway {
   private readonly syncInFlight = new Map<string, Promise<void>>();
@@ -72,7 +76,7 @@ export class WecomKfGateway {
       for (const job of this.store.listSubmittedPrintJobs()) {
         if (Date.now() - job.createdAt >= this.config.printStatusTimeoutMs) {
           if (this.store.finishTrackedPrintJob(job.messageId, 'timeout')) {
-            await this.safeSendText(job.openKfId, job.userId, `CUPS 任务 #${job.jobId} 在限定时间内未确认完成，请查看打印机或 cups-web 管理后台。`, job.messageId);
+            await this.safeSendText(job.openKfId, job.userId, `CUPS 打印任务 ${displayJobId(job.jobId)} 在限定时间内未确认完成，请查看打印机或 cups-web 管理后台。`, job.messageId);
           }
           continue;
         }
@@ -84,10 +88,10 @@ export class WecomKfGateway {
           continue;
         }
         if (state === 'completed' && this.store.finishTrackedPrintJob(job.messageId, 'completed')) {
-          await this.safeSendText(job.openKfId, job.userId, `CUPS 已完成任务 #${job.jobId}。请以实际出纸为准。`, job.messageId);
+          await this.safeSendText(job.openKfId, job.userId, `CUPS 已完成打印任务 ${displayJobId(job.jobId)}。请以实际出纸为准。`, job.messageId);
         }
         if (state === 'failed' && this.store.finishTrackedPrintJob(job.messageId, 'failed')) {
-          await this.safeSendText(job.openKfId, job.userId, `CUPS 任务 #${job.jobId} 已取消或失败，请检查打印机或 cups-web 管理后台。`, job.messageId);
+          await this.safeSendText(job.openKfId, job.userId, `CUPS 打印任务 ${displayJobId(job.jobId)} 已取消或失败，请检查打印机或 cups-web 管理后台。`, job.messageId);
         }
       }
     } finally {

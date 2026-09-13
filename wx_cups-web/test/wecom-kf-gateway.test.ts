@@ -50,13 +50,13 @@ test('先发送确认菜单，客户确认后才提交，并在 CUPS 完成时�
 
   assert.equal(submissions, 1);
   assert.equal(replies.length, 1);
-  assert.match(replies[0], /已提交 CUPS 任务/);
+  assert.match(replies[0], /已提交 CUPS 打印任务/);
   assert.equal(store.listSubmittedPrintJobs().length, 1);
   (gateway as unknown as { statusClient: { getStatus: () => Promise<'completed'> } }).statusClient = { getStatus: async () => 'completed' };
   await gateway.pollPrintJobs();
   await gateway.pollPrintJobs();
   assert.equal(replies.length, 2);
-  assert.match(replies[1], /CUPS 已完成任务/);
+  assert.match(replies[1], /CUPS 已完成打印任务/);
   store.close();
 });
 

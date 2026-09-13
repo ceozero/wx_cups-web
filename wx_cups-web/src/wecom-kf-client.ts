@@ -90,7 +90,7 @@ export class WecomKfClient {
       msgid: stableWecomMessageId(`menu:${messageKey}`),
       msgtype: 'msgmenu',
       msgmenu: {
-        head_content: '已收到打印内容。请确认是否提交打印：',
+        head_content: '已收到打印内容，请确认是否打印：',
         list: [
           { type: 'click', click: { id: confirmId, content: '确认打印' } },
           { type: 'click', click: { id: cancelId, content: '取消' } },

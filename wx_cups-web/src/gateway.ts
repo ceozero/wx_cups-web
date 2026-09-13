@@ -9,6 +9,10 @@ function duplicateReply(message: StoredMessage): ProcessingResult {
   return { status: message.status, reply: `该消息已处理：${previous}` };
 }
 
+function displayJobId(jobId: string | number): string {
+  return /\/jobs\/(\d+)$/.exec(String(jobId))?.[1] ?? String(jobId);
+}
+
 export class PrintGateway {
   constructor(private readonly config: Config, private readonly store: MessageStore, private readonly printer: PrinterSubmitter) {}
 
@@ -27,8 +31,8 @@ export class PrintGateway {
       this.store.transition(message.msgId, 'submitting');
       const receipts = [];
       for (const file of validated) receipts.push(await this.printer.submit(file));
-      const description = receipts.map((item) => `#${item.jobId}${item.pages === undefined ? '' : `（${item.pages} 页）`}`).join('、');
-      const reply = `已提交 CUPS 任务 ${description}。该状态仅表示任务已被接收，不代表已经出纸。`;
+      const description = receipts.map((item) => `${displayJobId(item.jobId)}${item.pages === undefined ? '' : `（${item.pages} 页）`}`).join('、');
+      const reply = `已提交 CUPS 打印任务 ${description}。该状态仅表示任务已被接收，不代表已经出纸。`;
       this.store.transition(message.msgId, 'accepted', reply);
       return { status: 'accepted', reply, receipts };
     } catch (error) {
