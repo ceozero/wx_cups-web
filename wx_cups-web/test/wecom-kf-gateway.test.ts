@@ -107,6 +107,10 @@ test('连续发送内容时菜单展示整个批次，旧菜单不能只确认�
   await gateway.syncFromCallback('wk-1', 'callback-latest-token');
   assert.equal(submissions, 2);
   assert.match(taskMenus.at(-1)!, /本批次已处理 2 个内容/);
+  (gateway as unknown as { statusClient: { getStatus: () => Promise<'completed'> } }).statusClient = { getStatus: async () => 'completed' };
+  await gateway.pollPrintJobs();
+  assert.equal(taskMenus.length, 2);
+  assert.match(taskMenus.at(-1)!, /CUPS 已完成打印任务 1、2。请以实际出纸为准。/);
   store.close();
 });
 

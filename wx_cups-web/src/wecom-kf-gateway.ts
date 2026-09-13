@@ -9,6 +9,16 @@ import { textFilename } from './validation.js';
 const MENU_PREFIX = 'print';
 const PRINT_RECORDS_MENU_ID = 'print:records';
 
+type TaskNotificationKind = 'completed' | 'failed' | 'timeout';
+
+interface TaskNotification {
+  openKfId: string;
+  userId: string;
+  kind: TaskNotificationKind;
+  messageIds: string[];
+  jobIds: string[];
+}
+
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown';
 }
@@ -53,6 +63,13 @@ function confirmationContent(pending: PendingPrint[]): string {
     return `${index + 1}. ${pendingName(item, imageIndex, fileIndex)}`;
   });
   return `如需打印更多，继续发送打印内容\n已收到打印内容，请确认是否打印：\n\n${lines.join('\n')}`;
+}
+
+function taskNotificationContent(kind: TaskNotificationKind, jobIds: string[]): string {
+  const jobs = jobIds.join('、');
+  if (kind === 'completed') return `CUPS 已完成打印任务 ${jobs}。请以实际出纸为准。`;
+  if (kind === 'failed') return `CUPS 打印任务 ${jobs} 已取消或失败，请检查打印机或 cups-web 管理后台。`;
+  return `CUPS 打印任务 ${jobs} 在限定时间内未确认完成，请查看打印机或 cups-web 管理后台。`;
 }
 
 /** 企业微信客服回调只负责唤醒；具体消息由 sync_msg 拉取。 */
@@ -102,11 +119,21 @@ export class WecomKfGateway {
     if (this.statusPolling) return;
     this.statusPolling = true;
     try {
+      const notifications = new Map<string, TaskNotification>();
+      const notify = (job: { messageId: string; openKfId: string; userId: string; jobId: string }, kind: TaskNotificationKind): void => {
+        const key = `${job.openKfId}\u0000${job.userId}\u0000${kind}`;
+        const notification = notifications.get(key) ?? {
+          openKfId: job.openKfId, userId: job.userId, kind, messageIds: [], jobIds: [],
+        };
+        notification.messageIds.push(job.messageId);
+        notification.jobIds.push(displayJobId(job.jobId));
+        notifications.set(key, notification);
+      };
       for (const job of this.store.listSubmittedPrintJobs()) {
         if (Date.now() - job.createdAt >= this.config.printStatusTimeoutMs) {
           if (this.store.finishTrackedPrintJob(job.messageId, 'timeout')) {
             this.store.finishPrintHistory(job.messageId, 'timeout');
-            await this.safeTaskReply(job.openKfId, job.userId, `CUPS 打印任务 ${displayJobId(job.jobId)} 在限定时间内未确认完成，请查看打印机或 cups-web 管理后台。`, job.messageId);
+            notify(job, 'timeout');
           }
           continue;
         }
@@ -119,12 +146,20 @@ export class WecomKfGateway {
         }
         if (state === 'completed' && this.store.finishTrackedPrintJob(job.messageId, 'completed')) {
           this.store.finishPrintHistory(job.messageId, 'completed');
-          await this.safeTaskReply(job.openKfId, job.userId, `CUPS 已完成打印任务 ${displayJobId(job.jobId)}。请以实际出纸为准。`, job.messageId);
+          notify(job, 'completed');
         }
         if (state === 'failed' && this.store.finishTrackedPrintJob(job.messageId, 'failed')) {
           this.store.finishPrintHistory(job.messageId, 'failed');
-          await this.safeTaskReply(job.openKfId, job.userId, `CUPS 打印任务 ${displayJobId(job.jobId)} 已取消或失败，请检查打印机或 cups-web 管理后台。`, job.messageId);
+          notify(job, 'failed');
         }
+      }
+      for (const notification of notifications.values()) {
+        await this.safeTaskReply(
+          notification.openKfId,
+          notification.userId,
+          taskNotificationContent(notification.kind, notification.jobIds),
+          notification.messageIds.join(','),
+        );
       }
     } finally {
       this.statusPolling = false;
