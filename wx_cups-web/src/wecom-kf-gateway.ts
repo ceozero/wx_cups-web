@@ -7,6 +7,7 @@ import { WecomKfClient, type KfMessage } from './wecom-kf-client.js';
 import { textFilename } from './validation.js';
 
 const MENU_PREFIX = 'print';
+const PRINT_RECORDS_MENU_ID = 'print:records';
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown';
@@ -25,6 +26,16 @@ function parseMenuId(value: string | undefined): { action: 'confirm' | 'cancel';
 
 function displayJobId(jobId: string): string {
   return /\/jobs\/(\d+)$/.exec(jobId)?.[1] ?? jobId;
+}
+
+function historyStatus(status: 'submitted' | 'completed' | 'failed' | 'timeout'): string {
+  return ({ submitted: '已提交', completed: '已完成', failed: '失败', timeout: '状态未知' })[status];
+}
+
+function historyTime(timestamp: number): string {
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(timestamp)).replace(/\//g, '/');
 }
 
 /** 企业微信客服回调只负责唤醒；具体消息由 sync_msg 拉取。 */
@@ -77,7 +88,8 @@ export class WecomKfGateway {
       for (const job of this.store.listSubmittedPrintJobs()) {
         if (Date.now() - job.createdAt >= this.config.printStatusTimeoutMs) {
           if (this.store.finishTrackedPrintJob(job.messageId, 'timeout')) {
-            await this.safeSendText(job.openKfId, job.userId, `CUPS 打印任务 ${displayJobId(job.jobId)} 在限定时间内未确认完成，请查看打印机或 cups-web 管理后台。`, job.messageId);
+            this.store.finishPrintHistory(job.messageId, 'timeout');
+            await this.safeTaskReply(job.openKfId, job.userId, `CUPS 打印任务 ${displayJobId(job.jobId)} 在限定时间内未确认完成，请查看打印机或 cups-web 管理后台。`, job.messageId);
           }
           continue;
         }
@@ -89,10 +101,12 @@ export class WecomKfGateway {
           continue;
         }
         if (state === 'completed' && this.store.finishTrackedPrintJob(job.messageId, 'completed')) {
-          await this.safeSendText(job.openKfId, job.userId, `CUPS 已完成打印任务 ${displayJobId(job.jobId)}。请以实际出纸为准。`, job.messageId);
+          this.store.finishPrintHistory(job.messageId, 'completed');
+          await this.safeTaskReply(job.openKfId, job.userId, `CUPS 已完成打印任务 ${displayJobId(job.jobId)}。请以实际出纸为准。`, job.messageId);
         }
         if (state === 'failed' && this.store.finishTrackedPrintJob(job.messageId, 'failed')) {
-          await this.safeSendText(job.openKfId, job.userId, `CUPS 打印任务 ${displayJobId(job.jobId)} 已取消或失败，请检查打印机或 cups-web 管理后台。`, job.messageId);
+          this.store.finishPrintHistory(job.messageId, 'failed');
+          await this.safeTaskReply(job.openKfId, job.userId, `CUPS 打印任务 ${displayJobId(job.jobId)} 已取消或失败，请检查打印机或 cups-web 管理后台。`, job.messageId);
         }
       }
     } finally {
@@ -129,6 +143,10 @@ export class WecomKfGateway {
   private async handleMessage(message: KfMessage): Promise<void> {
     // sync_msg 也会返回系统事件和接待人员在企业微信中发送的消息；仅客户消息可以触发打印。
     if (message.origin !== 3 || !message.external_userid || !message.msgid || !message.open_kfid) return;
+    if (message.text?.menu_id === PRINT_RECORDS_MENU_ID || message.text?.content?.trim() === '打印记录') {
+      await this.replyPrintHistory(message);
+      return;
+    }
     const selection = parseMenuId(message.text?.menu_id);
     if (selection) return this.handleMenuSelection(message, selection);
     await this.requestConfirmation(message);
@@ -175,9 +193,19 @@ export class WecomKfGateway {
     }
     try {
       const result = await this.printGateway.process(this.toIncoming(pending));
-      await this.safeReply(message, result.reply);
       if (result.status === 'accepted' && result.receipts?.length === 1) {
         this.store.trackPrintJob({ messageId: pending.msgId, userId: pending.userId, openKfId: pending.openKfId, jobId: String(result.receipts[0].jobId) });
+        this.store.addPrintHistory({
+          messageId: pending.msgId, userId: pending.userId, filename: result.receipts[0].filename ?? '未知文件',
+          jobId: String(result.receipts[0].jobId), pages: result.receipts[0].pages,
+        });
+      }
+      if (result.status === 'accepted' || result.status === 'uncertain') {
+        await this.safeTaskReply(message.open_kfid, message.external_userid!, result.reply, pending.msgId);
+      } else {
+        await this.safeReply(message, result.reply);
+      }
+      if (result.status === 'accepted' && result.receipts?.length === 1) {
         await this.pollPrintJobs();
       }
     } catch (error) {
@@ -205,6 +233,27 @@ export class WecomKfGateway {
 
   private async safeReply(message: KfMessage, content: string): Promise<void> {
     await this.safeSendText(message.open_kfid, message.external_userid!, content, message.msgid);
+  }
+
+  private async replyPrintHistory(message: KfMessage): Promise<void> {
+    const records = this.store.listRecentPrintHistory(message.external_userid!);
+    if (!records.length) {
+      await this.safeReply(message, '暂无打印记录。');
+      return;
+    }
+    const lines = records.map((record, index) => {
+      const pages = record.pages === undefined ? '' : ` · ${record.pages} 页`;
+      return `${index + 1}. ${record.filename} · ${historyStatus(record.status)} · 任务 ${displayJobId(record.jobId)}${pages} · ${historyTime(record.createdAt)}`;
+    });
+    await this.safeReply(message, `最近 ${records.length} 条打印记录：\n${lines.join('\n')}`);
+  }
+
+  private async safeTaskReply(openKfId: string, externalUserId: string, content: string, msgId: string): Promise<void> {
+    try {
+      await this.kf.sendPrintRecordMenu(openKfId, externalUserId, content, msgId);
+    } catch (error) {
+      console.error(JSON.stringify({ level: 'warn', event: 'wecom_kf_task_menu_failed', msgId, error: errorDetail(error) }));
+    }
   }
 
   private async safeSendText(openKfId: string, externalUserId: string, content: string, msgId: string): Promise<void> {

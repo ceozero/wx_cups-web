@@ -30,7 +30,7 @@ export class PrintGateway {
       const validated = files.map((file) => validateFile(file, this.config.maxFileBytes, this.config.maxPages));
       this.store.transition(message.msgId, 'submitting');
       const receipts = [];
-      for (const file of validated) receipts.push(await this.printer.submit(file));
+      for (const file of validated) receipts.push({ ...await this.printer.submit(file), filename: file.filename });
       const description = receipts.map((item) => `${displayJobId(item.jobId)}${item.pages === undefined ? '' : `（${item.pages} 页）`}`).join('、');
       const reply = `已提交 CUPS 打印任务 ${description}。该状态仅表示任务已被接收，不代表已经出纸。`;
       this.store.transition(message.msgId, 'accepted', reply);

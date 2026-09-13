@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { JobStatus, PendingPrint, PendingPrintKind, StoredMessage, TrackedPrintJob } from './types.js';
+import type { JobStatus, PendingPrint, PendingPrintKind, PrintHistoryRecord, StoredMessage, TrackedPrintJob } from './types.js';
 
 interface Row {
   msg_id: string;
@@ -29,6 +29,16 @@ interface TrackedPrintJobRow {
   open_kfid: string;
   job_id: string;
   status: TrackedPrintJob['status'];
+  created_at: number;
+}
+
+interface PrintHistoryRow {
+  message_id: string;
+  user_id: string;
+  filename: string;
+  job_id: string;
+  pages: number | null;
+  status: PrintHistoryRecord['status'];
   created_at: number;
 }
 
@@ -76,6 +86,17 @@ export class MessageStore {
         updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS tracked_print_jobs_status_idx ON tracked_print_jobs(status, created_at);
+      CREATE TABLE IF NOT EXISTS print_history (
+        message_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        job_id TEXT NOT NULL,
+        pages INTEGER,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS print_history_user_created_idx ON print_history(user_id, created_at DESC);
     `);
     this.recoverInterruptedMessages();
   }
@@ -167,6 +188,30 @@ export class MessageStore {
     const result = this.db.prepare("UPDATE tracked_print_jobs SET status = ?, updated_at = ? WHERE message_id = ? AND status = 'submitted'")
       .run(status, now, messageId);
     return result.changes === 1;
+  }
+
+  addPrintHistory(record: Omit<PrintHistoryRecord, 'status' | 'createdAt'>, now = Date.now()): void {
+    this.db.prepare(`
+      INSERT INTO print_history(message_id, user_id, filename, job_id, pages, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?)
+      ON CONFLICT(message_id) DO NOTHING
+    `).run(record.messageId, record.userId, record.filename, record.jobId, record.pages ?? null, now, now);
+  }
+
+  finishPrintHistory(messageId: string, status: Exclude<PrintHistoryRecord['status'], 'submitted'>, now = Date.now()): void {
+    this.db.prepare("UPDATE print_history SET status = ?, updated_at = ? WHERE message_id = ? AND status = 'submitted'")
+      .run(status, now, messageId);
+  }
+
+  listRecentPrintHistory(userId: string, limit = 5): PrintHistoryRecord[] {
+    const rows = this.db.prepare(`
+      SELECT message_id, user_id, filename, job_id, pages, status, created_at
+      FROM print_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?
+    `).all(userId, limit) as unknown as PrintHistoryRow[];
+    return rows.map((row) => ({
+      messageId: row.message_id, userId: row.user_id, filename: row.filename, jobId: row.job_id,
+      pages: row.pages ?? undefined, status: row.status, createdAt: row.created_at,
+    }));
   }
 
   close(): void {

@@ -25,6 +25,7 @@ export interface IncomingMessage {
 export interface PrintReceipt {
   jobId: string | number;
   pages?: number;
+  filename?: string;
 }
 
 export interface ProcessingResult {
@@ -57,6 +58,17 @@ export interface TrackedPrintJob {
   userId: string;
   openKfId: string;
   jobId: string;
+  status: 'submitted' | 'completed' | 'failed' | 'timeout';
+  createdAt: number;
+}
+
+/** 面向客户展示的近期打印记录，仅保存必要元数据，不保存文件内容。 */
+export interface PrintHistoryRecord {
+  messageId: string;
+  userId: string;
+  filename: string;
+  jobId: string;
+  pages?: number;
   status: 'submitted' | 'completed' | 'failed' | 'timeout';
   createdAt: number;
 }

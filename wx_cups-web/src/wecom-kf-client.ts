@@ -99,6 +99,19 @@ export class WecomKfClient {
     });
   }
 
+  async sendPrintRecordMenu(openKfId: string, externalUserId: string, content: string, messageKey: string): Promise<void> {
+    await this.post('kf/send_msg', {
+      touser: externalUserId,
+      open_kfid: openKfId,
+      msgid: stableWecomMessageId(`record-menu:${messageKey}:${content}`),
+      msgtype: 'msgmenu',
+      msgmenu: {
+        head_content: content.slice(0, 1024),
+        list: [{ type: 'click', click: { id: 'print:records', content: '打印记录' } }],
+      },
+    });
+  }
+
   async downloadMedia(mediaId: string, type: 'image' | 'file'): Promise<PrintableFile> {
     const response = await this.withRetry('企业微信媒体下载', async () => {
       const accessToken = await this.getAccessToken();

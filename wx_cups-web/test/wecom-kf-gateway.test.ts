@@ -15,11 +15,14 @@ const config: Config = {
   rateLimitCount: 10, rateLimitWindowMs: 600_000, requestTimeoutMs: 1000, printConfirmationTtlMs: 600_000, printStatusPollMs: 5_000, printStatusTimeoutMs: 600_000, wecomApiMaxRetries: 2, wecomApiRetryBaseMs: 500, wecomApiRequestTimeoutMs: 60_000,
 };
 
-function clientWith(messages: KfMessage[], replies: string[], menus: Array<{ confirmId: string; cancelId: string }>): WecomKfClient {
+function clientWith(
+  messages: KfMessage[], replies: string[], menus: Array<{ confirmId: string; cancelId: string }>, taskMenus: string[],
+): WecomKfClient {
   return {
     syncMessages: async () => ({ messages, nextCursor: 'cursor-1', hasMore: false }),
     sendText: async (_openKfId: string, _externalUserId: string, content: string) => { replies.push(content); },
     sendPrintConfirmationMenu: async (_openKfId: string, _externalUserId: string, confirmId: string, cancelId: string) => { menus.push({ confirmId, cancelId }); },
+    sendPrintRecordMenu: async (_openKfId: string, _externalUserId: string, content: string) => { taskMenus.push(content); },
     downloadMedia: async () => { throw new Error('测试不应下载媒体'); },
   } as unknown as WecomKfClient;
 }
@@ -28,13 +31,14 @@ test('先发送确认菜单，客户确认后才提交，并在 CUPS 完成时�
   const store = new MessageStore(':memory:');
   const replies: string[] = [];
   const menus: Array<{ confirmId: string; cancelId: string }> = [];
+  const taskMenus: string[] = [];
   let submissions = 0;
   const printer: PrinterSubmitter = { submit: async () => ({ jobId: ++submissions, pages: 1 }) };
   const printGateway = new PrintGateway(config, store, printer);
   const firstClient = clientWith([
     { msgid: 'staff-1', open_kfid: 'wk-1', external_userid: 'wm-alice', origin: 5, msgtype: 'text', text: { content: '坐席回复' } },
     { msgid: 'customer-1', open_kfid: 'wk-1', external_userid: 'wm-alice', origin: 3, msgtype: 'text', text: { content: '请打印' } },
-  ], replies, menus);
+  ], replies, menus, taskMenus);
   const gateway = new WecomKfGateway(config, store, printGateway, firstClient, { getStatus: async () => 'pending' });
 
   await gateway.syncFromCallback('wk-1', 'callback-message-token');
@@ -44,19 +48,27 @@ test('先发送确认菜单，客户确认后才提交，并在 CUPS 完成时�
   assert.equal(replies.length, 0);
   const confirmedClient = clientWith([
     { msgid: 'menu-click-1', open_kfid: 'wk-1', external_userid: 'wm-alice', origin: 3, msgtype: 'text', text: { content: '确认打印', menu_id: menus[0].confirmId } },
-  ], replies, menus);
+  ], replies, menus, taskMenus);
   (gateway as unknown as { kf: WecomKfClient }).kf = confirmedClient;
   await gateway.syncFromCallback('wk-1', 'callback-menu-token');
 
   assert.equal(submissions, 1);
-  assert.equal(replies.length, 1);
-  assert.match(replies[0], /已提交 CUPS 打印任务/);
+  assert.equal(taskMenus.length, 1);
+  assert.match(taskMenus[0], /已提交 CUPS 打印任务/);
   assert.equal(store.listSubmittedPrintJobs().length, 1);
   (gateway as unknown as { statusClient: { getStatus: () => Promise<'completed'> } }).statusClient = { getStatus: async () => 'completed' };
   await gateway.pollPrintJobs();
   await gateway.pollPrintJobs();
-  assert.equal(replies.length, 2);
-  assert.match(replies[1], /CUPS 已完成打印任务/);
+  assert.equal(taskMenus.length, 2);
+  assert.match(taskMenus[1], /CUPS 已完成打印任务/);
+  store.addPrintHistory({ messageId: 'other-user-print', userId: 'wm-bob', filename: 'other.pdf', jobId: '2', pages: 1 });
+  const recordsClient = clientWith([
+    { msgid: 'records-1', open_kfid: 'wk-1', external_userid: 'wm-alice', origin: 3, msgtype: 'text', text: { content: '打印记录', menu_id: 'print:records' } },
+  ], replies, menus, taskMenus);
+  (gateway as unknown as { kf: WecomKfClient }).kf = recordsClient;
+  await gateway.syncFromCallback('wk-1', 'callback-records-token');
+  assert.match(replies.at(-1)!, /最近 1 条打印记录：[\s\S]*请打印\.txt · 已完成 · 任务 1/);
+  assert.doesNotMatch(replies.at(-1)!, /other\.pdf/);
   store.close();
 });
 
@@ -64,6 +76,7 @@ test('同步期间的新回调会在当前同步结束后再次拉取', async ()
   const store = new MessageStore(':memory:');
   const replies: string[] = [];
   const menus: Array<{ confirmId: string; cancelId: string }> = [];
+  const taskMenus: string[] = [];
   const callbackTokens: string[] = [];
   let submissions = 0;
   let releaseFirst!: () => void;
@@ -84,6 +97,7 @@ test('同步期间的新回调会在当前同步结束后再次拉取', async ()
     },
     sendText: async (_openKfId: string, _externalUserId: string, content: string) => { replies.push(content); },
     sendPrintConfirmationMenu: async (_openKfId: string, _externalUserId: string, confirmId: string, cancelId: string) => { menus.push({ confirmId, cancelId }); },
+    sendPrintRecordMenu: async (_openKfId: string, _externalUserId: string, content: string) => { taskMenus.push(content); },
     downloadMedia: async () => { throw new Error('测试不应下载媒体'); },
   } as unknown as WecomKfClient;
   const printer: PrinterSubmitter = { submit: async () => ({ jobId: ++submissions, pages: 1 }) };
