@@ -52,7 +52,7 @@ function confirmationContent(pending: PendingPrint[]): string {
     if (item.kind === 'file') fileIndex += 1;
     return `${index + 1}. ${pendingName(item, imageIndex, fileIndex)}`;
   });
-  return `已收到打印内容，请确认是否打印：\n${lines.join('\n')}\n如需打印更多，继续发送打印内容`;
+  return `如需打印更多，继续发送打印内容\n已收到打印内容，请确认是否打印：\n\n${lines.join('\n')}`;
 }
 
 /** 企业微信客服回调只负责唤醒；具体消息由 sync_msg 拉取。 */

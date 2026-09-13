@@ -45,7 +45,7 @@ test('先发送确认菜单，客户确认后才提交，并在 CUPS 完成时�
 
   assert.equal(submissions, 0);
   assert.equal(menus.length, 1);
-  assert.match(menus[0].content, /1\. 请打印\.txt/);
+  assert.match(menus[0].content, /^如需打印更多，继续发送打印内容\n已收到打印内容，请确认是否打印：\n\n1\. 请打印\.txt/);
   assert.equal(menus[0].count, 1);
   assert.equal(replies.length, 0);
   const confirmedClient = clientWith([
@@ -89,7 +89,7 @@ test('连续发送内容时菜单展示整个批次，旧菜单不能只确认�
 
   await gateway.syncFromCallback('wk-1', 'callback-content-token');
   assert.equal(menus.length, 2);
-  assert.match(menus[1].content, /1\. 第一份\.txt\n2\. 第二份\.txt/);
+  assert.match(menus[1].content, /^如需打印更多，继续发送打印内容\n已收到打印内容，请确认是否打印：\n\n1\. 第一份\.txt\n2\. 第二份\.txt/);
   assert.equal(menus[1].count, 2);
 
   const staleClient = clientWith([
