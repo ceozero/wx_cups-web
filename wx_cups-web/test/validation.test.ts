@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ValidationError, sanitizeFilename, validateFile } from '../src/validation.js';
+import { ValidationError, sanitizeFilename, textFilename, validateFile } from '../src/validation.js';
 
 test('接受带正确 MIME 与文件头的 PDF', () => {
   const file = validateFile({ filename: 'report.pdf', contentType: 'application/pdf', buffer: Buffer.from('%PDF-1.7\n1 0 obj\n<< /Type /Page >>') }, 1024, 20);
@@ -15,4 +15,10 @@ test('拒绝 MIME 与文件头伪装', () => {
 test('文件名移除路径与控制字符', () => {
   const filename = sanitizeFilename('../../a\u0000b.txt');
   assert.doesNotMatch(filename, /[\\/\x00]/);
+});
+
+test('纯文本文件名取内容前十个 Unicode 字符并清理空白', () => {
+  assert.equal(textFilename('  微信客服打印测试文本内容\n下一行'), '微信客服打印测试文本.txt');
+  assert.equal(textFilename(''), 'message.txt');
+  assert.equal(textFilename('..........'), 'message.txt');
 });

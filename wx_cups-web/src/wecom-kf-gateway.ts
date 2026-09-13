@@ -4,6 +4,7 @@ import { PrintGateway } from './gateway.js';
 import { MessageStore } from './store.js';
 import type { IncomingMessage, PendingPrint, PrintableFile } from './types.js';
 import { WecomKfClient, type KfMessage } from './wecom-kf-client.js';
+import { textFilename } from './validation.js';
 
 const MENU_PREFIX = 'print';
 
@@ -197,7 +198,7 @@ export class WecomKfGateway {
   private toIncoming(pending: PendingPrint): IncomingMessage {
     const base = { msgId: pending.msgId, userId: pending.userId };
     if (pending.kind === 'text') {
-      return { ...base, loadFiles: async (): Promise<PrintableFile[]> => [{ filename: 'message.txt', contentType: 'text/plain', buffer: Buffer.from(pending.payload, 'utf8') }] };
+      return { ...base, loadFiles: async (): Promise<PrintableFile[]> => [{ filename: textFilename(pending.payload), contentType: 'text/plain', buffer: Buffer.from(pending.payload, 'utf8') }] };
     }
     const mediaType: 'image' | 'file' = pending.kind === 'image' ? 'image' : 'file';
     return { ...base, loadFiles: async (): Promise<PrintableFile[]> => [await this.kf.downloadMedia(pending.payload, mediaType)] };

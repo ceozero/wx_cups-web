@@ -41,6 +41,7 @@ docker compose up -d --build
 - 用户发送文字、图片或文件后，网关先发送“确认打印 / 取消”菜单；只有点击“确认打印”后才会下载文件并提交 CUPS。
 - 提交后立即回复 CUPS 任务编号，随后直接查询 CUPS 的 IPP `job-state`；状态变为 `completed` 时再回复“CUPS 已完成任务”。该状态以 CUPS 为准，仍应以实际出纸为准。
 - 网关将“确认打印”和“取消”发送为两条菜单消息；确认菜单默认 5 分钟有效，超时后自动失效。CUPS 状态每 5 秒查询一次，最多查询 10 分钟。可按需设置：`PRINT_CONFIRMATION_TTL_MS`、`PRINT_STATUS_POLL_MS`、`PRINT_STATUS_TIMEOUT_MS`。
+- 纯文本会以内容开头的前 10 个字符生成 `.txt` 文件名，便于在 cups-web 历史中识别；无法生成合法名称时回退为 `message.txt`。
 - 企业微信 API 单次请求默认 60 秒超时；网络超时、`408`、`429`、`5xx` 和可恢复错误码会按指数退避重试 2 次（首次请求共 3 次）。可使用 `WECOM_API_REQUEST_TIMEOUT_MS`、`WECOM_API_MAX_RETRIES`（`0`–`5`）和 `WECOM_API_RETRY_BASE_MS` 调整。回复使用稳定 `msgid`，重试不会重复发送。
 
 首次部署时，若日志报 `unable to open database file`，请在 Compose 文件目录执行：

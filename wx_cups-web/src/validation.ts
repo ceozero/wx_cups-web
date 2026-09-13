@@ -18,6 +18,18 @@ export function sanitizeFilename(name: string): string {
   return cleaned;
 }
 
+/** 为微信纯文本生成易识别的文件名；按 Unicode 字符而非 UTF-16 长度截取。 */
+export function textFilename(content: string): string {
+  const preview = Array.from(content.replace(/\s+/g, ' ').trim()).slice(0, 10).join('');
+  if (!preview) return 'message.txt';
+  try {
+    const filename = sanitizeFilename(`${preview}.txt`);
+    return filename === '.txt' || !filename.endsWith('.txt') ? 'message.txt' : filename;
+  } catch {
+    return 'message.txt';
+  }
+}
+
 function headerMatches(ext: string, buffer: Buffer): boolean {
   const header = buffer.subarray(0, 32);
   if (ext === '.pdf') return header.toString('ascii', 0, 5) === '%PDF-';
