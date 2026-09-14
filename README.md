@@ -20,26 +20,19 @@
 
 ## 部署
 
-在上游 cups-web 中创建普通用户并确认 CUPS 队列 URI。默认可使用一个共享账号；若希望 cups-web 的历史记录按个人微信用户隔离，则为每人创建单独的 cups-web 用户，并设置凭据映射。
+在上游 cups-web 中创建普通用户并确认 CUPS 队列 URI。复制配置模板后填写实际值：
 
 ```bash
-export CUPS_WEB_PASSWORD='cups-web 专用用户密码'
-export PRINTER_URI='http://127.0.0.1:631/printers/Office_A4'
-export WECOM_CORP_ID='wwxxxxxxxxxxxxxxxx'
-export WECOM_KF_SECRET='微信客服 Secret'
-export WECOM_CALLBACK_TOKEN='回调 Token'
-export WECOM_CALLBACK_ENCODING_AES_KEY='43 位 EncodingAESKey'
-export WECOM_OPEN_KF_IDS='wkxxxxxxxxxxxxxxxx'
-export WECOM_ALLOWED_EXTERNAL_USERS='wmxxxxxxxxxxxxxxxx'
-docker compose up -d --build
+cp .env.example .env
+# 编辑 .env，填写企业微信、CUPS 与 cups-web 配置
+docker compose up -d
 ```
 
-为每个个人微信用户使用独立 cups-web 账号时，保留 `WECOM_ALLOWED_EXTERNAL_USERS` 白名单，并设置 `WECOM_CUPS_USER_CREDENTIALS`（JSON）；启用映射后，白名单中的每个用户都必须有一组凭据，并优先于旧的共享账号配置：
+`.env` 默认不会提交到 Git。默认可使用一个共享 cups-web 账号；若希望 cups-web 的历史记录按个人微信用户隔离，则为每人创建单独的 cups-web 用户，并在 `.env` 设置 `WECOM_CUPS_USER_CREDENTIALS`（JSON）。启用映射后，白名单中的每个用户都必须有一组凭据，并优先于旧的共享账号配置：
 
-```bash
-export WECOM_ALLOWED_EXTERNAL_USERS='wmAlice,wmBob'
-export WECOM_CUPS_USER_CREDENTIALS='{"wmAlice":{"username":"alice","password":"alice 的 cups-web 密码"},"wmBob":{"username":"bob","password":"bob 的 cups-web 密码"}}'
-docker compose up -d --force-recreate
+```dotenv
+WECOM_ALLOWED_EXTERNAL_USERS=wmAlice,wmBob
+WECOM_CUPS_USER_CREDENTIALS='{"wmAlice":{"username":"alice","password":"alice 的 cups-web 密码"},"wmBob":{"username":"bob","password":"bob 的 cups-web 密码"}}'
 ```
 
 网关会按该映射使用独立登录会话提交任务，因此支持用户隔离的 cups-web 可直接按登录用户显示各自历史记录；网关内置的“打印记录”查询也仍会按个人微信用户隔离。

@@ -5,20 +5,8 @@ services:
     build: ./wx_cups-web
     container_name: wx_cups-web
     network_mode: host
-    environment:
-      - CUPS_WEB_URL=${CUPS_WEB_URL:-http://127.0.0.1:1180}
-      # 二选一：旧版单账号 CUPS_WEB_USER/CUPS_WEB_PASSWORD，或按微信用户映射的 WECOM_CUPS_USER_CREDENTIALS。
-      - CUPS_WEB_USER=${CUPS_WEB_USER:-}
-      - CUPS_WEB_PASSWORD=${CUPS_WEB_PASSWORD:-}
-      - WECOM_CUPS_USER_CREDENTIALS=${WECOM_CUPS_USER_CREDENTIALS:-}
-      - PRINTER_URI=${PRINTER_URI:?请设置 CUPS 打印机 URI}
-      - WECOM_CORP_ID=${WECOM_CORP_ID:?请设置企业微信 CorpID}
-      - WECOM_KF_SECRET=${WECOM_KF_SECRET:?请设置微信客服 Secret}
-      - WECOM_CALLBACK_TOKEN=${WECOM_CALLBACK_TOKEN:?请设置微信客服回调 Token}
-      - WECOM_CALLBACK_ENCODING_AES_KEY=${WECOM_CALLBACK_ENCODING_AES_KEY:?请设置微信客服回调 EncodingAESKey}
-      - WECOM_OPEN_KF_IDS=${WECOM_OPEN_KF_IDS:?请设置允许由 API 管理的客服帐号 ID}
-      - WECOM_ALLOWED_EXTERNAL_USERS=${WECOM_ALLOWED_EXTERNAL_USERS:?请设置逗号分隔的个人微信 external_userid 白名单}
-      - WECOM_CALLBACK_PORT=${WECOM_CALLBACK_PORT:-3000}
+    env_file:
+      - .env
     volumes:
       - ./data:/app/data
     restart: unless-stopped
