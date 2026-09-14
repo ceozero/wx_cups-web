@@ -35,7 +35,8 @@ export interface ProcessingResult {
 }
 
 export interface PrinterSubmitter {
-  submit(file: PrintableFile): Promise<PrintReceipt>;
+  /** 以对应个人微信用户映射的 cups-web 身份提交任务。 */
+  submit(file: PrintableFile, userId: string): Promise<PrintReceipt>;
 }
 
 export type PendingPrintKind = 'text' | 'image' | 'file';

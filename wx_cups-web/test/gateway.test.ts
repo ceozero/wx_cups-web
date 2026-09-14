@@ -6,7 +6,7 @@ import { MessageStore } from '../src/store.js';
 import type { PrintableFile, PrinterSubmitter } from '../src/types.js';
 
 const config: Config = {
-  cupsWebUrl: 'http://127.0.0.1:8080', cupsWebUser: 'wecom-gateway', cupsWebPassword: 'secret', printerUri: 'http://127.0.0.1:631/printers/Office_A4',
+  cupsWebUrl: 'http://127.0.0.1:8080', cupsCredentialsByExternalUser: new Map([['alice', { username: 'alice', password: 'secret' }]]), printerUri: 'http://127.0.0.1:631/printers/Office_A4',
   wecomCorpId: 'ww123', wecomKfSecret: 'kf-secret', wecomCallbackToken: 'callback-token',
   wecomCallbackEncodingAesKey: 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG', wecomCallbackHost: '127.0.0.1', wecomCallbackPort: 3000,
   openKfIds: new Set(['wk123']), allowedExternalUsers: new Set(['alice']), dataDir: ':memory:', maxFileBytes: 1024, maxPages: 20,
@@ -17,7 +17,8 @@ const textFile = (): PrintableFile => ({ filename: 'message.txt', contentType: '
 
 test('同一 msgid 只提交一次且返回原结果', async () => {
   let submits = 0;
-  const printer: PrinterSubmitter = { submit: async () => ({ jobId: ++submits, pages: 1 }) };
+  const submitters: string[] = [];
+  const printer: PrinterSubmitter = { submit: async (_file, userId) => { submitters.push(userId); return { jobId: ++submits, pages: 1 }; } };
   const store = new MessageStore(':memory:');
   const gateway = new PrintGateway(config, store, printer);
   const message = { msgId: 'm-1', userId: 'alice', loadFiles: async () => [textFile()] };
@@ -26,6 +27,7 @@ test('同一 msgid 只提交一次且返回原结果', async () => {
   assert.equal(first.status, 'accepted');
   assert.equal(second.status, 'accepted');
   assert.equal(submits, 1);
+  assert.deepEqual(submitters, ['alice']);
   assert.match(second.reply, /已处理/);
   store.close();
 });

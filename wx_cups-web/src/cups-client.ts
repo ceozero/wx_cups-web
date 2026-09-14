@@ -2,18 +2,18 @@ import axios, { AxiosError } from 'axios';
 import { wrapper } from 'axios-cookiejar-support';
 import FormData from 'form-data';
 import { CookieJar } from 'tough-cookie';
-import type { Config } from './config.js';
+import type { Config, CupsWebCredentials } from './config.js';
 import type { PrintableFile, PrintReceipt, PrinterSubmitter } from './types.js';
 
 export class SubmitUncertainError extends Error {}
 export class SubmitFailedError extends Error {}
 
-export class CupsWebClient implements PrinterSubmitter {
+class CupsWebSession {
   private readonly jar = new CookieJar();
   private readonly http;
   private loginInFlight?: Promise<void>;
 
-  constructor(private readonly config: Config) {
+  constructor(private readonly config: Config, private readonly credentials: CupsWebCredentials) {
     this.http = wrapper(axios.create({ baseURL: config.cupsWebUrl, jar: this.jar, timeout: config.requestTimeoutMs, validateStatus: () => true }));
   }
 
@@ -48,7 +48,25 @@ export class CupsWebClient implements PrinterSubmitter {
   }
 
   private async doLogin(): Promise<void> {
-    const response = await this.http.post('/api/login', { username: this.config.cupsWebUser, password: this.config.cupsWebPassword });
+    const response = await this.http.post('/api/login', { username: this.credentials.username, password: this.credentials.password });
     if (response.status < 200 || response.status >= 300) throw new SubmitFailedError(`cups-web 登录失败（HTTP ${response.status}）`);
+  }
+}
+
+/** 每个 cups-web 用户使用独立 Cookie Jar，避免登录态交叉导致历史记录归属错误。 */
+export class CupsWebClient implements PrinterSubmitter {
+  private readonly sessions = new Map<string, CupsWebSession>();
+
+  constructor(private readonly config: Config) {}
+
+  submit(file: PrintableFile, userId: string): Promise<PrintReceipt> {
+    const credentials = this.config.cupsCredentialsByExternalUser.get(userId);
+    if (!credentials) throw new SubmitFailedError('未配置该微信用户对应的 cups-web 凭据');
+    let session = this.sessions.get(userId);
+    if (!session) {
+      session = new CupsWebSession(this.config, credentials);
+      this.sessions.set(userId, session);
+    }
+    return session.submit(file);
   }
 }

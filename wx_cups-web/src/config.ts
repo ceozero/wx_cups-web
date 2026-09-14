@@ -1,9 +1,14 @@
 import { resolve } from 'node:path';
 
+export interface CupsWebCredentials {
+  username: string;
+  password: string;
+}
+
 export interface Config {
   cupsWebUrl: string;
-  cupsWebUser: string;
-  cupsWebPassword: string;
+  /** 每个个人微信 external_userid 对应的 cups-web 登录凭据。 */
+  cupsCredentialsByExternalUser: Map<string, CupsWebCredentials>;
   printerUri: string;
   wecomCorpId: string;
   wecomKfSecret: string;
@@ -57,16 +62,50 @@ function callbackAesKey(env: NodeJS.ProcessEnv): string {
   return value;
 }
 
+function cupsCredentials(env: NodeJS.ProcessEnv, allowedExternalUsers: Set<string>): Map<string, CupsWebCredentials> {
+  const perUser = env.WECOM_CUPS_USER_CREDENTIALS?.trim();
+  if (!perUser) {
+    const username = required(env, 'CUPS_WEB_USER');
+    const password = required(env, 'CUPS_WEB_PASSWORD');
+    return new Map([...allowedExternalUsers].map((userId) => [userId, { username, password }]));
+  }
+  let values: unknown;
+  try {
+    values = JSON.parse(perUser);
+  } catch {
+    throw new Error('WECOM_CUPS_USER_CREDENTIALS 必须是有效 JSON 对象');
+  }
+  if (!values || typeof values !== 'object' || Array.isArray(values)) {
+    throw new Error('WECOM_CUPS_USER_CREDENTIALS 必须是 external_userid 到用户名密码的对象');
+  }
+  const mapped = new Map<string, CupsWebCredentials>();
+  for (const [userId, rawCredentials] of Object.entries(values)) {
+    if (!allowedExternalUsers.has(userId)) throw new Error(`WECOM_CUPS_USER_CREDENTIALS 包含不在白名单中的用户：${userId}`);
+    if (!rawCredentials || typeof rawCredentials !== 'object' || Array.isArray(rawCredentials)) {
+      throw new Error(`WECOM_CUPS_USER_CREDENTIALS 中 ${userId} 的凭据格式无效`);
+    }
+    const { username, password } = rawCredentials as Record<string, unknown>;
+    if (typeof username !== 'string' || !username.trim() || typeof password !== 'string' || !password) {
+      throw new Error(`WECOM_CUPS_USER_CREDENTIALS 中 ${userId} 必须包含非空 username 和 password`);
+    }
+    mapped.set(userId, { username: username.trim(), password });
+  }
+  for (const userId of allowedExternalUsers) {
+    if (!mapped.has(userId)) throw new Error(`WECOM_CUPS_USER_CREDENTIALS 缺少白名单用户 ${userId} 的凭据`);
+  }
+  return mapped;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const openKfIds = new Set(required(env, 'WECOM_OPEN_KF_IDS').split(',').map((item) => item.trim()).filter(Boolean));
   const allowedExternalUsers = new Set(required(env, 'WECOM_ALLOWED_EXTERNAL_USERS').split(',').map((item) => item.trim()).filter(Boolean));
   if (!openKfIds.size) throw new Error('WECOM_OPEN_KF_IDS 不能为空，禁止处理未授权客服账号');
   if (!allowedExternalUsers.size) throw new Error('WECOM_ALLOWED_EXTERNAL_USERS 不能为空，禁止默认放行所有微信用户');
+  const cupsCredentialsByExternalUser = cupsCredentials(env, allowedExternalUsers);
 
   return {
     cupsWebUrl: required(env, 'CUPS_WEB_URL').replace(/\/$/, ''),
-    cupsWebUser: required(env, 'CUPS_WEB_USER'),
-    cupsWebPassword: required(env, 'CUPS_WEB_PASSWORD'),
+    cupsCredentialsByExternalUser,
     printerUri: required(env, 'PRINTER_URI'),
     wecomCorpId: required(env, 'WECOM_CORP_ID'),
     wecomKfSecret: required(env, 'WECOM_KF_SECRET'),
