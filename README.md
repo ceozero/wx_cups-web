@@ -28,7 +28,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-`.env` 默认不会提交到 Git。默认可使用一个共享 cups-web 账号；若希望 cups-web 的历史记录按个人微信用户隔离，则为每人创建单独的 cups-web 用户，并在 `.env` 设置 `WECOM_CUPS_USER_CREDENTIALS`（JSON）。启用映射后，白名单中的每个用户都必须有一组凭据，并优先于旧的共享账号配置：
+`.env` 默认不会提交到 Git。推荐为每个个人微信用户创建独立 cups-web 用户，并在 `.env` 设置 `WECOM_CUPS_USER_CREDENTIALS`（JSON）：这样 cups-web 历史与客服“打印记录”都会按用户隔离。映射必须覆盖白名单中的每个用户：
 
 ```dotenv
 WECOM_ALLOWED_EXTERNAL_USERS=wmAlice,wmBob
@@ -36,6 +36,8 @@ WECOM_CUPS_USER_CREDENTIALS='{"wmAlice":{"username":"alice","password":"alice �
 ```
 
 网关会按该映射使用独立登录会话提交任务，因此支持用户隔离的 cups-web 可直接按登录用户显示各自历史记录；网关内置的“打印记录”查询也仍会按个人微信用户隔离。
+
+旧版共享账号 `CUPS_WEB_USER` / `CUPS_WEB_PASSWORD` 仅用于兼容已有部署；不设置 `WECOM_CUPS_USER_CREDENTIALS` 时才会启用，所有用户会共享同一份 cups-web 历史。
 
 网关使用 host 网络，通过 `127.0.0.1:1180` 访问独立运行的 cups-web；如需其他地址，设置 `CUPS_WEB_URL`。SQLite 数据保存到项目的 `./data`。
 
