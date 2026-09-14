@@ -8,7 +8,8 @@ import { WecomKfClient } from './wecom-kf-client.js';
 
 const config = loadConfig();
 const store = new MessageStore(config.dataDir);
-const kfGateway = new WecomKfGateway(config, store, new PrintGateway(config, store, new CupsWebClient(config)), new WecomKfClient(config));
+const cupsWeb = new CupsWebClient(config);
+const kfGateway = new WecomKfGateway(config, store, new PrintGateway(config, store, cupsWeb), new WecomKfClient(config), undefined, cupsWeb);
 const server = await startHttpServer(config, kfGateway);
 kfGateway.startBackgroundWorkers();
 

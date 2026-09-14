@@ -32,6 +32,7 @@ test('先发送确认菜单，客户确认后才提交，并在 CUPS 完成时�
   const replies: string[] = [];
   const menus: Array<{ content: string; confirmId: string; cancelId: string; count: number }> = [];
   const taskMenus: string[] = [];
+  const historyUsers: string[] = [];
   let submissions = 0;
   const printer: PrinterSubmitter = { submit: async () => ({ jobId: ++submissions, pages: 1 }) };
   const printGateway = new PrintGateway(config, store, printer);
@@ -39,7 +40,12 @@ test('先发送确认菜单，客户确认后才提交，并在 CUPS 完成时�
     { msgid: 'staff-1', open_kfid: 'wk-1', external_userid: 'wm-alice', origin: 5, msgtype: 'text', text: { content: '坐席回复' } },
     { msgid: 'customer-1', open_kfid: 'wk-1', external_userid: 'wm-alice', origin: 3, msgtype: 'text', text: { content: '请打印' } },
   ], replies, menus, taskMenus);
-  const gateway = new WecomKfGateway(config, store, printGateway, firstClient, { getStatus: async () => 'pending' });
+  const gateway = new WecomKfGateway(config, store, printGateway, firstClient, { getStatus: async () => 'pending' }, {
+    listPrintRecords: async (userId) => {
+      historyUsers.push(userId);
+      return [{ filename: '请打印.txt', jobId: '1', pages: 1, status: 'printed', createdAt: '2026-09-14T08:00:00Z' }];
+    },
+  });
 
   await gateway.syncFromCallback('wk-1', 'callback-message-token');
 
@@ -63,14 +69,13 @@ test('先发送确认菜单，客户确认后才提交，并在 CUPS 完成时�
   await gateway.pollPrintJobs();
   assert.equal(taskMenus.length, 2);
   assert.match(taskMenus[1], /CUPS 已完成打印任务/);
-  store.addPrintHistory({ messageId: 'other-user-print', userId: 'wm-bob', filename: 'other.pdf', jobId: '2', pages: 1 });
   const recordsClient = clientWith([
     { msgid: 'records-1', open_kfid: 'wk-1', external_userid: 'wm-alice', origin: 3, msgtype: 'text', text: { content: '打印记录', menu_id: 'print:records' } },
   ], replies, menus, taskMenus);
   (gateway as unknown as { kf: WecomKfClient }).kf = recordsClient;
   await gateway.syncFromCallback('wk-1', 'callback-records-token');
-  assert.match(replies.at(-1)!, /最近 1 条打印记录：[\s\S]*请打印\.txt · 已完成 · 任务 1/);
-  assert.doesNotMatch(replies.at(-1)!, /other\.pdf/);
+  assert.deepEqual(historyUsers, ['wm-alice']);
+  assert.match(replies.at(-1)!, /cups-web 最近 1 条打印记录：[\s\S]*请打印\.txt · 已打印 · 任务 1 · 1 页/);
   store.close();
 });
 

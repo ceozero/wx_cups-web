@@ -3,7 +3,7 @@ import { wrapper } from 'axios-cookiejar-support';
 import FormData from 'form-data';
 import { CookieJar } from 'tough-cookie';
 import type { Config, CupsWebCredentials } from './config.js';
-import type { PrintableFile, PrintReceipt, PrinterSubmitter } from './types.js';
+import type { CupsWebPrintRecord, PrintHistoryReader, PrintableFile, PrintReceipt, PrinterSubmitter } from './types.js';
 
 export class SubmitUncertainError extends Error {}
 export class SubmitFailedError extends Error {}
@@ -42,6 +42,30 @@ class CupsWebSession {
     }
   }
 
+  async listPrintRecords(limit: number, retried = false): Promise<CupsWebPrintRecord[]> {
+    await this.login();
+    const response = await this.http.get<unknown>('/api/print-records');
+    if (!retried && (response.status === 401 || response.status === 403)) {
+      this.loginInFlight = undefined;
+      await this.login();
+      return this.listPrintRecords(limit, true);
+    }
+    if (response.status < 200 || response.status >= 300 || !Array.isArray(response.data)) {
+      throw new SubmitFailedError(`cups-web 查询打印记录失败（HTTP ${response.status}）`);
+    }
+    return response.data
+      .filter((record): record is Record<string, unknown> => Boolean(record) && typeof record === 'object')
+      .map((record) => ({
+        filename: typeof record.filename === 'string' ? record.filename : '未知文件',
+        jobId: typeof record.jobId === 'string' ? record.jobId : '',
+        pages: typeof record.pages === 'number' && Number.isFinite(record.pages) ? record.pages : 0,
+        status: typeof record.status === 'string' ? record.status : 'unknown',
+        createdAt: typeof record.createdAt === 'string' ? record.createdAt : '',
+      }))
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+      .slice(0, limit);
+  }
+
   private async login(): Promise<void> {
     if (!this.loginInFlight) this.loginInFlight = this.doLogin().catch((error) => { this.loginInFlight = undefined; throw error; });
     return this.loginInFlight;
@@ -54,12 +78,20 @@ class CupsWebSession {
 }
 
 /** 每个 cups-web 用户使用独立 Cookie Jar，避免登录态交叉导致历史记录归属错误。 */
-export class CupsWebClient implements PrinterSubmitter {
+export class CupsWebClient implements PrinterSubmitter, PrintHistoryReader {
   private readonly sessions = new Map<string, CupsWebSession>();
 
   constructor(private readonly config: Config) {}
 
   submit(file: PrintableFile, userId: string): Promise<PrintReceipt> {
+    return this.sessionFor(userId).submit(file);
+  }
+
+  listPrintRecords(userId: string, limit = 5): Promise<CupsWebPrintRecord[]> {
+    return this.sessionFor(userId).listPrintRecords(limit);
+  }
+
+  private sessionFor(userId: string): CupsWebSession {
     const credentials = this.config.cupsCredentialsByExternalUser.get(userId);
     if (!credentials) throw new SubmitFailedError('未配置该微信用户对应的 cups-web 凭据');
     let session = this.sessions.get(userId);
@@ -67,6 +99,6 @@ export class CupsWebClient implements PrinterSubmitter {
       session = new CupsWebSession(this.config, credentials);
       this.sessions.set(userId, session);
     }
-    return session.submit(file);
+    return session;
   }
 }

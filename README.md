@@ -56,7 +56,7 @@ WECOM_CUPS_USER_CREDENTIALS='{"wmAlice":{"username":"alice","password":"alice �
   取消
   ```
 - 纯文本会以内容开头的前 10 个字符生成 `.txt` 文件名，便于在 cups-web 历史中识别；无法生成合法名称时回退为 `message.txt`。
-- 用户发送“打印记录”，或点击任意打印任务回执中的“打印记录”按钮，可查询自己最近 5 条记录；每条展示文件名、状态、任务号、页数和提交时间，不会暴露其他用户记录。
+- 用户发送“打印记录”，或点击任意打印任务回执中的“打印记录”按钮，网关会以该个人微信用户映射的 cups-web 身份查询 `/api/print-records`，返回 cups-web 最近 5 条记录；每条展示文件名、状态、任务号、页数和提交时间。cups-web 的 `printed` 仅表示已向 CUPS 提交，实际出纸仍以 CUPS 完成回执为准。
 - 企业微信 API 单次请求默认 60 秒超时；网络超时、`408`、`429`、`5xx` 和可恢复错误码会按指数退避重试 2 次（首次请求共 3 次）。可使用 `WECOM_API_REQUEST_TIMEOUT_MS`、`WECOM_API_MAX_RETRIES`（`0`–`5`）和 `WECOM_API_RETRY_BASE_MS` 调整。回复使用稳定 `msgid`，重试不会重复发送。
 
 首次部署时，若日志报 `unable to open database file`，请在 Compose 文件目录执行：

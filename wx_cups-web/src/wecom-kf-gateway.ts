@@ -2,7 +2,8 @@ import type { Config } from './config.js';
 import { CupsJobStatusClient, type CupsJobState } from './cups-job-status.js';
 import { PrintGateway } from './gateway.js';
 import { MessageStore } from './store.js';
-import type { IncomingMessage, PendingPrint, PrintableFile } from './types.js';
+import { CupsWebClient } from './cups-client.js';
+import type { CupsWebPrintRecord, IncomingMessage, PendingPrint, PrintableFile, PrintHistoryReader } from './types.js';
 import { WecomKfClient, type KfMessage } from './wecom-kf-client.js';
 import { textFilename } from './validation.js';
 
@@ -38,11 +39,12 @@ function displayJobId(jobId: string): string {
   return /\/jobs\/(\d+)$/.exec(jobId)?.[1] ?? jobId;
 }
 
-function historyStatus(status: 'submitted' | 'completed' | 'failed' | 'timeout'): string {
-  return ({ submitted: '已提交', completed: '已完成', failed: '失败', timeout: '状态未知' })[status];
+function historyStatus(status: string): string {
+  return ({ queued: '排队中', printed: '已打印' } as Record<string, string>)[status] ?? status;
 }
 
-function historyTime(timestamp: number): string {
+function historyTime(timestamp: string): string {
+  if (Number.isNaN(Date.parse(timestamp))) return '未知时间';
   return new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date(timestamp)).replace(/\//g, '/');
@@ -94,6 +96,7 @@ export class WecomKfGateway {
     private readonly printGateway: PrintGateway,
     private readonly kf: WecomKfClient,
     statusClient: Pick<CupsJobStatusClient, 'getStatus'> = new CupsJobStatusClient(config),
+    private readonly historyClient: PrintHistoryReader = new CupsWebClient(config),
   ) {
     this.statusClient = statusClient;
   }
@@ -304,16 +307,24 @@ export class WecomKfGateway {
   }
 
   private async replyPrintHistory(message: KfMessage): Promise<void> {
-    const records = this.store.listRecentPrintHistory(message.external_userid!);
+    let records: CupsWebPrintRecord[];
+    try {
+      records = await this.historyClient.listPrintRecords(message.external_userid!, 5);
+    } catch (error) {
+      console.error(JSON.stringify({ level: 'warn', event: 'cups_web_history_failed', externalUserId: message.external_userid, error: errorDetail(error) }));
+      await this.safeReply(message, '查询 cups-web 打印记录失败，请稍后重试。');
+      return;
+    }
     if (!records.length) {
-      await this.safeReply(message, '暂无打印记录。');
+      await this.safeReply(message, 'cups-web 暂无打印记录。');
       return;
     }
     const lines = records.map((record, index) => {
-      const pages = record.pages === undefined ? '' : ` · ${record.pages} 页`;
-      return `${index + 1}. ${record.filename} · ${historyStatus(record.status)} · 任务 ${displayJobId(record.jobId)}${pages} · ${historyTime(record.createdAt)}`;
+      const pages = record.pages > 0 ? ` · ${record.pages} 页` : '';
+      const job = record.jobId ? ` · 任务 ${displayJobId(record.jobId)}` : '';
+      return `${index + 1}. ${record.filename} · ${historyStatus(record.status)}${job}${pages} · ${historyTime(record.createdAt)}`;
     });
-    await this.safeReply(message, `最近 ${records.length} 条打印记录：\n${lines.join('\n')}`);
+    await this.safeReply(message, `cups-web 最近 ${records.length} 条打印记录：\n${lines.join('\n')}`);
   }
 
   private async safeTaskReply(openKfId: string, externalUserId: string, content: string, msgId: string): Promise<void> {

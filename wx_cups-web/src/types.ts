@@ -28,6 +28,19 @@ export interface PrintReceipt {
   filename?: string;
 }
 
+/** cups-web 用户级 /api/print-records 返回的必要字段。 */
+export interface CupsWebPrintRecord {
+  filename: string;
+  jobId: string;
+  pages: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface PrintHistoryReader {
+  listPrintRecords(userId: string, limit?: number): Promise<CupsWebPrintRecord[]>;
+}
+
 export interface ProcessingResult {
   status: JobStatus;
   reply: string;
