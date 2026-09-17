@@ -18,9 +18,7 @@ class CupsWebSession {
   }
 
   async submit(file: PrintableFile): Promise<PrintReceipt> {
-    await this.login();
-    const csrf = (await this.jar.getCookies(this.config.cupsWebUrl)).find((cookie) => cookie.key === 'csrf_token')?.value;
-    if (!csrf) throw new SubmitFailedError('cups-web 登录未返回 CSRF Token');
+    const csrf = await this.csrfToken();
     const form = new FormData();
     form.append('file', file.buffer, { filename: file.filename, contentType: file.contentType });
     form.append('printer', this.config.printerUri);
@@ -31,7 +29,11 @@ class CupsWebSession {
       if (response.status >= 200 && response.status < 300 && response.data?.ok !== false && response.data?.jobId !== undefined) {
         return { jobId: response.data.jobId, pages: response.data.pages };
       }
-      if (response.status === 401 || response.status === 403) this.loginInFlight = undefined;
+      if (response.status === 401 || response.status === 403) {
+        // 该请求已被 cups-web 的鉴权层拒绝，清空本地 Cookie；下一次确认会自动重新登录。
+        // 这里绝不重发 POST，避免网络边界情况下重复出纸。
+        await this.jar.removeAllCookies();
+      }
       if (response.status >= 500) throw new SubmitUncertainError(`cups-web 返回 ${response.status}`);
       throw new SubmitFailedError(`cups-web 拒绝打印请求（HTTP ${response.status}）`);
     } catch (error) {
@@ -43,11 +45,11 @@ class CupsWebSession {
   }
 
   async listPrintRecords(limit: number, retried = false): Promise<CupsWebPrintRecord[]> {
-    await this.login();
+    await this.ensureLoggedIn();
     const response = await this.http.get<unknown>('/api/print-records');
     if (!retried && (response.status === 401 || response.status === 403)) {
-      this.loginInFlight = undefined;
-      await this.login();
+      await this.jar.removeAllCookies();
+      await this.ensureLoggedIn();
       return this.listPrintRecords(limit, true);
     }
     if (response.status < 200 || response.status >= 300 || !Array.isArray(response.data)) {
@@ -67,8 +69,45 @@ class CupsWebSession {
   }
 
   private async login(): Promise<void> {
-    if (!this.loginInFlight) this.loginInFlight = this.doLogin().catch((error) => { this.loginInFlight = undefined; throw error; });
-    return this.loginInFlight;
+    if (this.loginInFlight) return this.loginInFlight;
+    const request = this.doLogin();
+    this.loginInFlight = request;
+    try {
+      await request;
+    } finally {
+      // 此字段只是并发登录锁，不能作为“登录态永远有效”的缓存。
+      if (this.loginInFlight === request) this.loginInFlight = undefined;
+    }
+  }
+
+  /**
+   * cups-web 的 session / csrf_token 默认会过期。每次操作先检查 Cookie，
+   * 缺失时才重新登录；不会因普通提交而反复登录。
+   */
+  private async ensureLoggedIn(): Promise<void> {
+    const cookies = await this.jar.getCookies(this.config.cupsWebUrl);
+    if (cookies.some((cookie) => cookie.key === 'session')) return;
+    await this.login();
+  }
+
+  private async csrfToken(): Promise<string> {
+    await this.ensureLoggedIn();
+    let csrf = await this.readCsrfToken();
+    if (csrf) return csrf;
+
+    // session 仍在但 CSRF 已过期（或 cups-web 被重启）时，强制刷新整组登录 Cookie。
+    await this.jar.removeAllCookies();
+    await this.login();
+    csrf = await this.readCsrfToken();
+    if (csrf) return csrf;
+
+    throw new SubmitFailedError(
+      'cups-web 登录后未返回 CSRF Token，请检查 CUPS_WEB_URL 与 cups-web 的 COOKIE_SECURE / 反向代理 Cookie 配置是否一致',
+    );
+  }
+
+  private async readCsrfToken(): Promise<string | undefined> {
+    return (await this.jar.getCookies(this.config.cupsWebUrl)).find((cookie) => cookie.key === 'csrf_token')?.value;
   }
 
   private async doLogin(): Promise<void> {

@@ -8,6 +8,7 @@
 - SQLite 持久化 `msgid` 与消息游标；重复投递、网关重启、网络超时均不会自动重复出纸。
 - `external_userid` 白名单、10 分钟 10 次限流、20 MB 限制、文件头/扩展名校验、文件名净化，以及固定 A4/黑白/单面/1 份参数。
 - Cookie Jar + CSRF Token 登录 `cups-web`；全部凭据只由环境变量提供，绝不写入日志、镜像或仓库。
+- 网关会在 cups-web 会话或 CSRF Cookie 过期后自动重新登录；不会自动重发已发出的打印提交，避免重复出纸。
 - 仅处理来自个人微信客户的消息；系统事件和企业微信坐席消息不会被误提交打印。每个客户消息只发送一条最终回执，客服回执失败仅记录错误，不会造成网关进程退出。
 
 ## 企业微信侧配置
@@ -40,6 +41,8 @@ WECOM_CUPS_USER_CREDENTIALS='{"wmAlice":{"username":"alice","password":"alice �
 旧版共享账号 `CUPS_WEB_USER` / `CUPS_WEB_PASSWORD` 仅用于兼容已有部署；不设置 `WECOM_CUPS_USER_CREDENTIALS` 时才会启用，所有用户会共享同一份 cups-web 历史。
 
 网关使用 host 网络，通过 `127.0.0.1:1180` 访问独立运行的 cups-web；如需其他地址，设置 `CUPS_WEB_URL`。SQLite 数据保存到项目的 `./data`。
+
+若客服提示“登录后未返回 CSRF Token”，通常是 `CUPS_WEB_URL` 使用的协议与 cups-web 的 Cookie 配置不一致：网关通过 HTTP 访问时，cups-web 不应强制 `COOKIE_SECURE=true`；通过 HTTPS 反向代理访问时，应把 `CUPS_WEB_URL` 配为对应的 HTTPS 地址，并确保反向代理正确传递 `X-Forwarded-Proto: https`。
 
 ## 打印确认与回执
 
