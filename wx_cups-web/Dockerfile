@@ -1,28 +1,16 @@
-FROM node:22-alpine AS dependencies
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+FROM golang:1.25-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags="-s -w" -o /out/wx-cups-web .
 
-FROM dependencies AS build
+FROM alpine:3.22
 WORKDIR /app
-COPY tsconfig.json ./
-COPY src ./src
-RUN npm run build
-
-FROM node:22-alpine AS production-dependencies
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts \
-  && npm cache clean --force
-
-FROM node:22-alpine
-WORKDIR /app
-ENV NODE_ENV=production
-# 运行时仅保留 Node、生产依赖和用于挂载目录降权的 su-exec。
+# 仅保留静态 Go 二进制、根证书与挂载目录降权工具。
 RUN apk add --no-cache ca-certificates su-exec
-COPY --from=production-dependencies /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
+COPY --from=build /out/wx-cups-web /usr/local/bin/wx-cups-web
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint
-RUN mkdir -p /app/data && chown -R node:node /app && chmod 755 /usr/local/bin/docker-entrypoint
+RUN mkdir -p /app/data && chmod 755 /usr/local/bin/wx-cups-web /usr/local/bin/docker-entrypoint
 ENTRYPOINT ["docker-entrypoint"]
-CMD ["node", "dist/index.js"]
+CMD ["wx-cups-web"]

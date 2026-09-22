@@ -75,9 +75,12 @@ docker compose up -d --force-recreate
 
 ```powershell
 Set-Location .\wx_cups-web
-npm install
-npm test
-npm run check
+go test .
+go vet .
+go build -buildvcs=false -trimpath -o wx-cups-web.exe .
 ```
+
+Go 版本使用纯 Go 的 `modernc.org/sqlite`，不依赖 CGO；构建容器会以
+`CGO_ENABLED=0` 产出 Linux `amd64` 和 `arm64` 均可用的静态二进制。
 
 推送 `main`/`master` 或 `v*` 标签会自动构建并发布 `linux/amd64`、`linux/arm64` 镜像到 `ghcr.io/<仓库所有者>/wx_cups-web`。

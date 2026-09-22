@@ -2,3 +2,7 @@ node_modules
 dist
 test
 npm-debug.log*
+.gocache
+.gomodcache
+.gopath
+wx-cups-web-linux-*

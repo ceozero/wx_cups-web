@@ -5,3 +5,7 @@ data/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+wx_cups-web/.gocache/
+wx_cups-web/.gomodcache/
+wx_cups-web/.gopath/
+wx_cups-web/wx-cups-web-linux-*
