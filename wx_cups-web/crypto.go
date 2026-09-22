@@ -43,7 +43,9 @@ func decryptWecomPayload(encrypted, encodingAESKey, corpID string) (string, erro
 	plain := make([]byte, len(ciphertext))
 	cipher.NewCBCDecrypter(block, key[:aes.BlockSize]).CryptBlocks(plain, ciphertext)
 	padding := int(plain[len(plain)-1])
-	if padding == 0 || padding > aes.BlockSize || padding > len(plain) {
+	// 企业微信使用的 PKCS#7 填充块大小是 32；AES-CBC 的密码块仍为 16。
+	// 因此填充长度可以是 17–32，不能按 aes.BlockSize(16) 限制。
+	if padding == 0 || padding > 32 || padding > len(plain) {
 		return "", fmt.Errorf("企业微信回调填充无效")
 	}
 	for _, b := range plain[len(plain)-padding:] {

@@ -38,7 +38,8 @@ func encryptForTest(plain, key, receive string) string {
 	binary.BigEndian.PutUint32(msg[16:], uint32(len(plain)))
 	msg = append(msg, []byte(plain)...)
 	msg = append(msg, []byte(receive)...)
-	padding := aes.BlockSize - len(msg)%aes.BlockSize
+	// 企业微信协议的 PKCS#7 填充块大小固定为 32，而非 AES 的 16。
+	padding := 32 - len(msg)%32
 	msg = append(msg, bytesRepeat(byte(padding), padding)...)
 	decoded, _ := base64.StdEncoding.DecodeString(key + "=")
 	block, _ := aes.NewCipher(decoded)
@@ -66,6 +67,18 @@ func TestCallbackCryptoRoundTrip(t *testing.T) {
 	}
 	if verifyWecomSignature("token", "bad", "1", "2", encrypted) {
 		t.Fatal("错误签名不应通过")
+	}
+}
+
+func TestCallbackCryptoAcceptsWecomPaddingOverAESBlockSize(t *testing.T) {
+	key := testEnv()["WECOM_CALLBACK_ENCODING_AES_KEY"]
+	// 前缀 20 字节加 receiveId 6 字节后，21 字节正文会产生 17 字节填充。
+	// 这是企业微信合法、但旧 Go 实现误拒绝的场景。
+	message := "aaaaaaaaaaaaaaaaaaaaa"
+	encrypted := encryptForTest(message, key, "wwtest")
+	plain, err := decryptWecomPayload(encrypted, key, "wwtest")
+	if err != nil || plain != message {
+		t.Fatalf("应接受企业微信 17 字节填充: %v, %q", err, plain)
 	}
 }
 func TestValidationAndTextFilename(t *testing.T) {
