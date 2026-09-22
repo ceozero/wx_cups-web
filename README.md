@@ -45,7 +45,7 @@ API Key 认证不依赖 Cookie，因此 `COOKIE_SECURE`、网页登录和浏览�
 
 - 用户发送文字、图片或文件后，网关先发送确认菜单；只有点击“确认打印 N 个内容”后才会下载文件并提交 CUPS。多个内容全部提交成功时，会合并为一条“已提交 CUPS 打印任务 7（1 页）、8（1 页）”回执，避免重复说明。
 - 提交后立即回复 CUPS 任务编号，随后直接查询 CUPS 的 IPP `job-state`；同一轮查询中完成的多个任务会合并为一条“CUPS 已完成打印任务 7、8”回执并附“打印记录”按钮，节省客服回复额度。该状态以 CUPS 为准，仍应以实际出纸为准。
-- 每次收到新的打印内容，网关都会发送一条更新后的确认菜单，列出当前批次所有待打印内容；旧菜单自动失效，必须点击最新菜单。确认菜单默认 10 分钟有效，超时后自动失效。CUPS 状态每 5 秒查询一次，最多查询 10 分钟。可按需设置：`PRINT_CONFIRMATION_TTL_MS`、`PRINT_STATUS_POLL_MS`、`PRINT_STATUS_TIMEOUT_MS`。
+- 每次同步到新的打印内容，网关会按客户合并为一条更新后的确认菜单，列出当前批次所有待打印内容；旧菜单自动失效，必须点击最新菜单。确认菜单默认 10 分钟有效，超时后自动失效。超过确认最大年龄的积压内容不会再主动发菜单，防止容器重启或游标恢复时耗尽客服回复额度。CUPS 状态每 5 秒查询一次，最多查询 10 分钟。可按需设置：`PRINT_CONFIRMATION_TTL_MS`、`WECOM_CONFIRMATION_MAX_AGE_MS`、`WECOM_REPLY_MIN_INTERVAL_MS`、`PRINT_STATUS_POLL_MS`、`PRINT_STATUS_TIMEOUT_MS`。
 
   ```text
   如需打印更多，继续发送打印内容
@@ -59,7 +59,7 @@ API Key 认证不依赖 Cookie，因此 `COOKIE_SECURE`、网页登录和浏览�
   ```
 - 纯文本会以内容开头的前 10 个字符生成 `.txt` 文件名，便于在 cups-web 历史中识别；无法生成合法名称时回退为 `message.txt`。
 - 用户发送“打印记录”，或点击任意打印任务回执中的“打印记录”按钮，网关会以该个人微信用户映射的 cups-web 身份查询 `/api/print-records`，返回 cups-web 最近 5 条记录；每条展示文件名、状态、任务号、页数和提交时间。cups-web 的 `printed` 仅表示已向 CUPS 提交，实际出纸仍以 CUPS 完成回执为准。
-- 企业微信 API 单次请求默认 60 秒超时；网络超时、`408`、`429`、`5xx` 和可恢复错误码会按指数退避重试 2 次（首次请求共 3 次）。可使用 `WECOM_API_REQUEST_TIMEOUT_MS`、`WECOM_API_MAX_RETRIES`（`0`–`5`）和 `WECOM_API_RETRY_BASE_MS` 调整。回复使用稳定 `msgid`，重试不会重复发送。
+- 企业微信 API 单次请求默认 60 秒超时；网络超时、`408`、`429`、`5xx` 和可恢复错误码会按指数退避重试 2 次（首次请求共 3 次）。可使用 `WECOM_API_REQUEST_TIMEOUT_MS`、`WECOM_API_MAX_RETRIES`（`0`–`5`）和 `WECOM_API_RETRY_BASE_MS` 调整。回复使用稳定 `msgid`；企业微信返回 `95033 repeated msgid` 时会按此前已接收处理。网关会按客户以默认 1.2 秒间隔发送客服回复，避免积压同步造成突发请求。
 
 首次部署时，若日志报 `unable to open database file`，请在 Compose 文件目录执行：
 

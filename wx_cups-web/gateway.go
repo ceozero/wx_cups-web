@@ -178,13 +178,14 @@ func (w *WecomKfGateway) sync(open, token string) error {
 	if err != nil {
 		return err
 	}
+	confirmations := map[string]KfMessage{}
 	for {
 		messages, next, more, err := w.kf.syncMessages(open, token, cursor)
 		if err != nil {
 			return err
 		}
 		for _, m := range messages {
-			if err := w.handleMessage(m); err != nil {
+			if err := w.handleMessage(m, confirmations); err != nil {
 				return err
 			}
 		}
@@ -198,6 +199,11 @@ func (w *WecomKfGateway) sync(open, token string) error {
 			return errors.New("微信客服 sync_msg 返回 has_more 但未返回 next_cursor")
 		}
 		if !more {
+			for _, message := range confirmations {
+				if err := w.sendLatestConfirmation(message); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 	}
@@ -215,7 +221,7 @@ func menuID(action, msg string) string {
 	}
 	return ""
 }
-func (w *WecomKfGateway) handleMessage(m KfMessage) error {
+func (w *WecomKfGateway) handleMessage(m KfMessage, confirmations map[string]KfMessage) error {
 	if m.Origin != 3 || m.ExternalUserID == "" || m.MsgID == "" || m.OpenKfID == "" {
 		return nil
 	}
@@ -227,7 +233,7 @@ func (w *WecomKfGateway) handleMessage(m KfMessage) error {
 			return w.handleMenu(m, action, id)
 		}
 	}
-	return w.requestConfirmation(m)
+	return w.requestConfirmation(m, confirmations)
 }
 func (w *WecomKfGateway) toPending(m KfMessage) (PendingPrint, bool) {
 	p := PendingPrint{MsgID: m.MsgID, UserID: m.ExternalUserID, OpenKfID: m.OpenKfID}
@@ -271,7 +277,7 @@ func confirmationContent(p []PendingPrint) string {
 	}
 	return "如需打印更多，继续发送打印内容\n已收到打印内容，请确认是否打印：\n\n" + strings.Join(lines, "\n")
 }
-func (w *WecomKfGateway) requestConfirmation(m KfMessage) error {
+func (w *WecomKfGateway) requestConfirmation(m KfMessage, confirmations map[string]KfMessage) error {
 	p, ok := w.toPending(m)
 	if !ok {
 		w.safeReply(m, "暂不支持该消息类型；请发送文字、图片或受支持的文件。")
@@ -282,6 +288,10 @@ func (w *WecomKfGateway) requestConfirmation(m KfMessage) error {
 		w.safeReply(m, "无打印权限，请联系管理员开通白名单。")
 		return nil
 	}
+	if isStaleConfirmation(m.SendTime, w.config.WecomConfirmationMaxAgeMS, nowMillis()) {
+		logJSON("info", "wecom_kf_confirmation_skipped_stale", map[string]any{"msgId": m.MsgID, "ageMs": nowMillis() - m.SendTime*1000})
+		return nil
+	}
 	p.ExpiresAt = nowMillis() + int64(w.config.PrintConfirmationTTLMS)
 	created, err := w.store.createPending(p)
 	if err != nil {
@@ -290,9 +300,22 @@ func (w *WecomKfGateway) requestConfirmation(m KfMessage) error {
 	if !created {
 		return nil
 	}
+	confirmations[m.OpenKfID+"\x00"+m.ExternalUserID] = m
+	return nil
+}
+
+func isStaleConfirmation(sendTimeSeconds int64, maxAgeMS int, now int64) bool {
+	return sendTimeSeconds > 0 && now-sendTimeSeconds*1000 > int64(maxAgeMS)
+}
+
+// 一次 sync_msg 批量拉取只发一条确认菜单，且菜单始终对应客户的最新内容。
+func (w *WecomKfGateway) sendLatestConfirmation(m KfMessage) error {
 	batch, err := w.store.listActivePending(m.ExternalUserID, m.OpenKfID, nowMillis())
 	if err != nil {
 		return err
+	}
+	if len(batch) == 0 {
+		return nil
 	}
 	latest := batch[len(batch)-1]
 	confirm, cancel := menuID("confirm", latest.MsgID), menuID("cancel", latest.MsgID)

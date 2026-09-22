@@ -47,6 +47,7 @@ type KfMessage struct {
 	ExternalUserID string `json:"external_userid"`
 	OpenKfID       string `json:"open_kfid"`
 	MsgType        string `json:"msgtype"`
+	SendTime       int64  `json:"send_time"`
 	Origin         int    `json:"origin"`
 	Text           *struct {
 		Content string `json:"content"`

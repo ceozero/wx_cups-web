@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const wecomAPIBase = "https://qyapi.weixin.qq.com/cgi-bin"
+var wecomAPIBase = "https://qyapi.weixin.qq.com/cgi-bin"
 
 type wecomAPIError struct {
 	message   string
@@ -43,10 +43,12 @@ type WecomKfClient struct {
 	mu          sync.Mutex
 	accessToken string
 	expiresAt   int64
+	replyMu     sync.Mutex
+	nextReplyAt map[string]time.Time
 }
 
 func newWecomKfClient(c Config) *WecomKfClient {
-	return &WecomKfClient{config: c, client: &http.Client{Timeout: time.Duration(c.WecomAPIRequestTimeoutMS) * time.Millisecond}}
+	return &WecomKfClient{config: c, client: &http.Client{Timeout: time.Duration(c.WecomAPIRequestTimeoutMS) * time.Millisecond}, nextReplyAt: map[string]time.Time{}}
 }
 func (c *WecomKfClient) withRetry(operation string, fn func() error) error {
 	for attempt := 0; ; attempt++ {
@@ -150,6 +152,12 @@ func (c *WecomKfClient) post(path string, payload any, result any) error {
 			return err
 		}
 		if api.ErrCode != 0 {
+			// msgid 是调用方主动设置的幂等键。响应丢失后的重试会得到 95033，
+			// 表示同一条客服消息此前已被企业微信接收，应按成功处理。
+			if path == "kf/send_msg" && api.ErrCode == 95033 {
+				logJSON("info", "wecom_kf_message_already_accepted", map[string]any{"path": path})
+				return nil
+			}
 			if api.ErrCode == 40001 || api.ErrCode == 40014 || api.ErrCode == 42001 {
 				c.mu.Lock()
 				c.accessToken = ""
@@ -159,6 +167,23 @@ func (c *WecomKfClient) post(path string, payload any, result any) error {
 		}
 		return json.Unmarshal(raw, result)
 	})
+}
+func (c *WecomKfClient) waitReplySlot(open, user string) {
+	if c.config.WecomReplyMinIntervalMS == 0 {
+		return
+	}
+	key := open + "\x00" + user
+	interval := time.Duration(c.config.WecomReplyMinIntervalMS) * time.Millisecond
+	c.replyMu.Lock()
+	due, now := c.nextReplyAt[key], time.Now()
+	if due.Before(now) {
+		due = now
+	}
+	c.nextReplyAt[key] = due.Add(interval)
+	c.replyMu.Unlock()
+	if delay := time.Until(due); delay > 0 {
+		time.Sleep(delay)
+	}
 }
 func (c *WecomKfClient) syncMessages(open, callback, cursor string) ([]KfMessage, string, bool, error) {
 	var result struct {
@@ -170,13 +195,16 @@ func (c *WecomKfClient) syncMessages(open, callback, cursor string) ([]KfMessage
 	return result.MsgList, result.NextCursor, result.HasMore == 1, err
 }
 func (c *WecomKfClient) sendText(open, user, content, key string) error {
+	c.waitReplySlot(open, user)
 	return c.post("kf/send_msg", map[string]any{"touser": user, "open_kfid": open, "msgid": stableWecomMessageID("text:" + key + ":" + content), "msgtype": "text", "text": map[string]string{"content": truncateRunes(content, 2048)}}, &struct{}{})
 }
 func (c *WecomKfClient) sendConfirmation(open, user, content, confirm, cancel string, count int, key string) error {
+	c.waitReplySlot(open, user)
 	payload := map[string]any{"touser": user, "open_kfid": open, "msgid": stableWecomMessageID("menu-confirm:" + key), "msgtype": "msgmenu", "msgmenu": map[string]any{"head_content": truncateRunes(content, 1024), "list": []any{map[string]any{"type": "click", "click": map[string]string{"id": confirm, "content": fmt.Sprintf("确认打印 %d 个内容", count)}}, map[string]any{"type": "click", "click": map[string]string{"id": cancel, "content": "取消"}}}}}
 	return c.post("kf/send_msg", payload, &struct{}{})
 }
 func (c *WecomKfClient) sendRecordMenu(open, user, content, key string) error {
+	c.waitReplySlot(open, user)
 	payload := map[string]any{"touser": user, "open_kfid": open, "msgid": stableWecomMessageID("record-menu:" + key + ":" + content), "msgtype": "msgmenu", "msgmenu": map[string]any{"head_content": truncateRunes(content, 1024), "list": []any{map[string]any{"type": "click", "click": map[string]string{"id": "print:records", "content": "打印记录"}}}}}
 	return c.post("kf/send_msg", payload, &struct{}{})
 }

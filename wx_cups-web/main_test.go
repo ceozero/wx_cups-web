@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testEnv() map[string]string {
@@ -132,9 +133,97 @@ func TestIPPRequestAndResponseParsing(t *testing.T) {
 
 func TestKfMessageJSONUsesWecomFieldNames(t *testing.T) {
 	var message KfMessage
-	err := json.Unmarshal([]byte(`{"msgid":"m1","external_userid":"wm1","open_kfid":"wk1","origin":3,"msgtype":"text","text":{"content":"hello","menu_id":"print:records"}}`), &message)
-	if err != nil || message.ExternalUserID != "wm1" || message.OpenKfID != "wk1" || message.Text == nil || message.Text.MenuID != "print:records" {
+	err := json.Unmarshal([]byte(`{"msgid":"m1","external_userid":"wm1","open_kfid":"wk1","send_time":123,"origin":3,"msgtype":"text","text":{"content":"hello","menu_id":"print:records"}}`), &message)
+	if err != nil || message.ExternalUserID != "wm1" || message.OpenKfID != "wk1" || message.SendTime != 123 || message.Text == nil || message.Text.MenuID != "print:records" {
 		t.Fatalf("企业微信字段映射错误: %#v, %v", message, err)
+	}
+}
+
+func TestRepeatedWecomMessageIDIsIdempotentSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/gettoken":
+			_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok","access_token":"token","expires_in":7200}`))
+		case "/kf/send_msg":
+			_, _ = w.Write([]byte(`{"errcode":95033,"errmsg":"repeated msgid"}`))
+		default:
+			t.Fatalf("未预期的企业微信路径：%s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	previousBase := wecomAPIBase
+	wecomAPIBase = server.URL
+	defer func() { wecomAPIBase = previousBase }()
+	c, err := loadConfigFrom(testEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.WecomReplyMinIntervalMS = 0
+	if err := newWecomKfClient(c).sendText("wk1", "wm1", "已收到", "m1"); err != nil {
+		t.Fatalf("95033 应按幂等成功处理：%v", err)
+	}
+}
+
+func TestStaleConfirmationIsSkipped(t *testing.T) {
+	now := int64(1_700_000_000_000)
+	if !isStaleConfirmation(now/1000-601, 600000, now) {
+		t.Fatal("超过最大年龄的积压消息应跳过确认菜单")
+	}
+	if isStaleConfirmation(now/1000-600, 600000, now) {
+		t.Fatal("处于最大年龄边界的消息不应跳过")
+	}
+}
+
+func TestSyncCoalescesConfirmationMenusPerCustomer(t *testing.T) {
+	var sends int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/gettoken":
+			_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok","access_token":"token","expires_in":7200}`))
+		case "/kf/sync_msg":
+			_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok","has_more":0,"msg_list":[` +
+				`{"msgid":"m1","open_kfid":"wk1","external_userid":"wm1","send_time":1700000000,"origin":3,"msgtype":"text","text":{"content":"first"}},` +
+				`{"msgid":"m2","open_kfid":"wk1","external_userid":"wm1","send_time":1700000001,"origin":3,"msgtype":"text","text":{"content":"second"}}]}`))
+		case "/kf/send_msg":
+			sends++
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload["msgid"] != stableWecomMessageID("menu-confirm:m2") {
+				t.Fatalf("确认菜单应绑定最新消息：%v", payload["msgid"])
+			}
+			_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
+		default:
+			t.Fatalf("未预期的企业微信路径：%s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	previousBase := wecomAPIBase
+	wecomAPIBase = server.URL
+	defer func() { wecomAPIBase = previousBase }()
+	c, err := loadConfigFrom(testEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.WecomReplyMinIntervalMS = 0
+	c.WecomConfirmationMaxAgeMS = 60 * 60 * 1000
+	store, err := newStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	client := newWecomKfClient(c)
+	gate := newWecomKfGateway(c, store, nil, client, nil, nil)
+	nowMillis = func() int64 { return 1_700_000_002_000 }
+	defer func() { nowMillis = func() int64 { return time.Now().UnixMilli() } }()
+	if err := gate.sync("wk1", "callback"); err != nil {
+		t.Fatal(err)
+	}
+	if sends != 1 {
+		t.Fatalf("同一同步批次应只发一条确认菜单，实际 %d 条", sends)
 	}
 }
 

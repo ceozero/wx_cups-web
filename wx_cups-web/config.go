@@ -21,6 +21,7 @@ type Config struct {
 	DataDir                                                                     string
 	MaxFileBytes, MaxPages, RateLimitCount, RateLimitWindowMS, RequestTimeoutMS int
 	PrintConfirmationTTLMS, PrintStatusPollMS, PrintStatusTimeoutMS             int
+	WecomConfirmationMaxAgeMS, WecomReplyMinIntervalMS                          int
 	WecomAPIMaxRetries, WecomAPIRetryBaseMS, WecomAPIRequestTimeoutMS           int
 }
 
@@ -154,6 +155,12 @@ func loadConfigFrom(env map[string]string) (Config, error) {
 		return c, err
 	}
 	if c.PrintConfirmationTTLMS, err = positiveInt(env, "PRINT_CONFIRMATION_TTL_MS", 600000); err != nil {
+		return c, err
+	}
+	if c.WecomConfirmationMaxAgeMS, err = positiveInt(env, "WECOM_CONFIRMATION_MAX_AGE_MS", c.PrintConfirmationTTLMS); err != nil {
+		return c, err
+	}
+	if c.WecomReplyMinIntervalMS, err = nonNegativeInt(env, "WECOM_REPLY_MIN_INTERVAL_MS", 1200, 60000); err != nil {
 		return c, err
 	}
 	if c.PrintStatusPollMS, err = positiveInt(env, "PRINT_STATUS_POLL_MS", 5000); err != nil {
