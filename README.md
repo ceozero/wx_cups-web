@@ -7,8 +7,7 @@
 - 通过企业微信「微信客服」的加密 HTTPS 回调接收事件，并调用 `kf/sync_msg` 拉取文本、图片和文件。
 - SQLite 持久化 `msgid` 与消息游标；重复投递、网关重启、网络超时均不会自动重复出纸。
 - `external_userid` 白名单、10 分钟 10 次限流、20 MB 限制、文件头/扩展名校验、文件名净化，以及固定 A4/黑白/单面/1 份参数。
-- Cookie Jar + CSRF Token 登录 `cups-web`；全部凭据只由环境变量提供，绝不写入日志、镜像或仓库。
-- 网关会在 cups-web 会话或 CSRF Cookie 过期后自动重新登录；不会自动重发已发出的打印提交，避免重复出纸。
+- 每位个人微信用户使用其 cups-web 用户签发的 API Key 调用 `cups-web`；不使用 Cookie、CSRF 或 cups-web 登录密码，全部密钥只由环境变量提供，绝不写入日志、镜像或仓库。
 - 仅处理来自个人微信客户的消息；系统事件和企业微信坐席消息不会被误提交打印。每个客户消息只发送一条最终回执，客服回执失败仅记录错误，不会造成网关进程退出。
 
 ## 企业微信侧配置
@@ -29,20 +28,18 @@ cp .env.example .env
 docker compose up -d
 ```
 
-`.env` 默认不会提交到 Git。推荐为每个个人微信用户创建独立 cups-web 用户，并在 `.env` 设置 `WECOM_CUPS_USER_CREDENTIALS`（JSON）：这样 cups-web 历史与客服“打印记录”都会按用户隔离。映射必须覆盖白名单中的每个用户：
+`.env` 默认不会提交到 Git。为每个个人微信用户创建独立 cups-web 用户；分别登录这些用户，在 cups-web 的「密钥」页面创建一枚 `wx_cups-web` 专用 API Key。将微信用户与其 API Key 填入 `WECOM_CUPS_API_KEYS`（JSON），映射必须覆盖白名单中的每个用户：
 
 ```dotenv
 WECOM_ALLOWED_EXTERNAL_USERS=wmAlice,wmBob
-WECOM_CUPS_USER_CREDENTIALS='{"wmAlice":{"username":"alice","password":"alice 的 cups-web 密码"},"wmBob":{"username":"bob","password":"bob 的 cups-web 密码"}}'
+WECOM_CUPS_API_KEYS='{"wmAlice":"cw_ALICE_API_KEY","wmBob":"cw_BOB_API_KEY"}'
 ```
 
-网关会按该映射使用独立登录会话提交任务，因此支持用户隔离的 cups-web 可直接按登录用户显示各自历史记录；网关内置的“打印记录”查询也仍会按个人微信用户隔离。
-
-旧版共享账号 `CUPS_WEB_USER` / `CUPS_WEB_PASSWORD` 仅用于兼容已有部署；不设置 `WECOM_CUPS_USER_CREDENTIALS` 时才会启用，所有用户会共享同一份 cups-web 历史。
+网关会按该映射带对应的 `Authorization: Bearer cw_...` 请求头提交任务；cups-web 据此识别原生用户，因此 cups-web 历史与网关内置的“打印记录”查询都按个人微信用户隔离。API Key 无效、过期、撤销或权限不足时，网关不会尝试登录或重发打印，而会返回明确错误。
 
 网关使用 host 网络，通过 `127.0.0.1:1180` 访问独立运行的 cups-web；如需其他地址，设置 `CUPS_WEB_URL`。SQLite 数据保存到项目的 `./data`。
 
-若客服提示“登录后未返回 CSRF Token”，通常是 `CUPS_WEB_URL` 使用的协议与 cups-web 的 Cookie 配置不一致：网关通过 HTTP 访问时，cups-web 不应强制 `COOKIE_SECURE=true`；通过 HTTPS 反向代理访问时，应把 `CUPS_WEB_URL` 配为对应的 HTTPS 地址，并确保反向代理正确传递 `X-Forwarded-Proto: https`。
+API Key 认证不依赖 Cookie，因此 `COOKIE_SECURE`、网页登录和浏览器会话过期均不会影响网关。建议网关到 cups-web 的链路仍使用受信网络或 HTTPS。
 
 ## 打印确认与回执
 

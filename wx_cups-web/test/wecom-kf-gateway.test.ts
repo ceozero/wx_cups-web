@@ -8,7 +8,7 @@ import { WecomKfGateway } from '../src/wecom-kf-gateway.js';
 import type { KfMessage, WecomKfClient } from '../src/wecom-kf-client.js';
 
 const config: Config = {
-  cupsWebUrl: 'http://127.0.0.1:1180', cupsCredentialsByExternalUser: new Map([['wm-alice', { username: 'alice', password: 'secret' }]]), printerUri: 'http://127.0.0.1:631/printers/Office_A4',
+  cupsWebUrl: 'http://127.0.0.1:1180', cupsApiKeysByExternalUser: new Map([['wm-alice', 'cw_ALICE']]), printerUri: 'http://127.0.0.1:631/printers/Office_A4',
   wecomCorpId: 'ww123', wecomKfSecret: 'kf-secret', wecomCallbackToken: 'callback-token',
   wecomCallbackEncodingAesKey: 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG', wecomCallbackHost: '127.0.0.1', wecomCallbackPort: 3000,
   openKfIds: new Set(['wk-1']), allowedExternalUsers: new Set(['wm-alice']), dataDir: ':memory:', maxFileBytes: 1024, maxPages: 20,

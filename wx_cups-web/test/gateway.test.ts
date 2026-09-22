@@ -6,7 +6,7 @@ import { MessageStore } from '../src/store.js';
 import type { PrintableFile, PrinterSubmitter } from '../src/types.js';
 
 const config: Config = {
-  cupsWebUrl: 'http://127.0.0.1:8080', cupsCredentialsByExternalUser: new Map([['alice', { username: 'alice', password: 'secret' }]]), printerUri: 'http://127.0.0.1:631/printers/Office_A4',
+  cupsWebUrl: 'http://127.0.0.1:8080', cupsApiKeysByExternalUser: new Map([['alice', 'cw_ALICE']]), printerUri: 'http://127.0.0.1:631/printers/Office_A4',
   wecomCorpId: 'ww123', wecomKfSecret: 'kf-secret', wecomCallbackToken: 'callback-token',
   wecomCallbackEncodingAesKey: 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG', wecomCallbackHost: '127.0.0.1', wecomCallbackPort: 3000,
   openKfIds: new Set(['wk123']), allowedExternalUsers: new Set(['alice']), dataDir: ':memory:', maxFileBytes: 1024, maxPages: 20,

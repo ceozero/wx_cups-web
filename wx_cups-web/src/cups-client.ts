@@ -1,39 +1,35 @@
 import axios, { AxiosError } from 'axios';
-import { wrapper } from 'axios-cookiejar-support';
 import FormData from 'form-data';
-import { CookieJar } from 'tough-cookie';
-import type { Config, CupsWebCredentials } from './config.js';
+import type { Config } from './config.js';
 import type { CupsWebPrintRecord, PrintHistoryReader, PrintableFile, PrintReceipt, PrinterSubmitter } from './types.js';
 
 export class SubmitUncertainError extends Error {}
 export class SubmitFailedError extends Error {}
 
 class CupsWebSession {
-  private readonly jar = new CookieJar();
   private readonly http;
-  private loginInFlight?: Promise<void>;
 
-  constructor(private readonly config: Config, private readonly credentials: CupsWebCredentials) {
-    this.http = wrapper(axios.create({ baseURL: config.cupsWebUrl, jar: this.jar, timeout: config.requestTimeoutMs, validateStatus: () => true }));
+  constructor(private readonly config: Config, apiKey: string) {
+    this.http = axios.create({
+      baseURL: config.cupsWebUrl,
+      timeout: config.requestTimeoutMs,
+      validateStatus: () => true,
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
   }
 
   async submit(file: PrintableFile): Promise<PrintReceipt> {
-    const csrf = await this.csrfToken();
     const form = new FormData();
     form.append('file', file.buffer, { filename: file.filename, contentType: file.contentType });
     form.append('printer', this.config.printerUri);
     form.append('duplex', 'false'); form.append('color', 'false'); form.append('copies', '1');
     form.append('paper_size', 'A4'); form.append('print_scaling', 'auto');
     try {
-      const response = await this.http.post('/api/print', form, { headers: { ...form.getHeaders(), 'X-CSRF-Token': csrf } });
+      const response = await this.http.post('/api/print', form, { headers: form.getHeaders() });
       if (response.status >= 200 && response.status < 300 && response.data?.ok !== false && response.data?.jobId !== undefined) {
         return { jobId: response.data.jobId, pages: response.data.pages };
       }
-      if (response.status === 401 || response.status === 403) {
-        // 该请求已被 cups-web 的鉴权层拒绝，清空本地 Cookie；下一次确认会自动重新登录。
-        // 这里绝不重发 POST，避免网络边界情况下重复出纸。
-        await this.jar.removeAllCookies();
-      }
+      if (response.status === 401 || response.status === 403) throw new SubmitFailedError('cups-web API Key 无效、已过期、已撤销或权限不足');
       if (response.status >= 500) throw new SubmitUncertainError(`cups-web 返回 ${response.status}`);
       throw new SubmitFailedError(`cups-web 拒绝打印请求（HTTP ${response.status}）`);
     } catch (error) {
@@ -44,13 +40,10 @@ class CupsWebSession {
     }
   }
 
-  async listPrintRecords(limit: number, retried = false): Promise<CupsWebPrintRecord[]> {
-    await this.ensureLoggedIn();
+  async listPrintRecords(limit: number): Promise<CupsWebPrintRecord[]> {
     const response = await this.http.get<unknown>('/api/print-records');
-    if (!retried && (response.status === 401 || response.status === 403)) {
-      await this.jar.removeAllCookies();
-      await this.ensureLoggedIn();
-      return this.listPrintRecords(limit, true);
+    if (response.status === 401 || response.status === 403) {
+      throw new SubmitFailedError('cups-web API Key 无效、已过期、已撤销或权限不足');
     }
     if (response.status < 200 || response.status >= 300 || !Array.isArray(response.data)) {
       throw new SubmitFailedError(`cups-web 查询打印记录失败（HTTP ${response.status}）`);
@@ -67,56 +60,9 @@ class CupsWebSession {
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
       .slice(0, limit);
   }
-
-  private async login(): Promise<void> {
-    if (this.loginInFlight) return this.loginInFlight;
-    const request = this.doLogin();
-    this.loginInFlight = request;
-    try {
-      await request;
-    } finally {
-      // 此字段只是并发登录锁，不能作为“登录态永远有效”的缓存。
-      if (this.loginInFlight === request) this.loginInFlight = undefined;
-    }
-  }
-
-  /**
-   * cups-web 的 session / csrf_token 默认会过期。每次操作先检查 Cookie，
-   * 缺失时才重新登录；不会因普通提交而反复登录。
-   */
-  private async ensureLoggedIn(): Promise<void> {
-    const cookies = await this.jar.getCookies(this.config.cupsWebUrl);
-    if (cookies.some((cookie) => cookie.key === 'session')) return;
-    await this.login();
-  }
-
-  private async csrfToken(): Promise<string> {
-    await this.ensureLoggedIn();
-    let csrf = await this.readCsrfToken();
-    if (csrf) return csrf;
-
-    // session 仍在但 CSRF 已过期（或 cups-web 被重启）时，强制刷新整组登录 Cookie。
-    await this.jar.removeAllCookies();
-    await this.login();
-    csrf = await this.readCsrfToken();
-    if (csrf) return csrf;
-
-    throw new SubmitFailedError(
-      'cups-web 登录后未返回 CSRF Token，请检查 CUPS_WEB_URL 与 cups-web 的 COOKIE_SECURE / 反向代理 Cookie 配置是否一致',
-    );
-  }
-
-  private async readCsrfToken(): Promise<string | undefined> {
-    return (await this.jar.getCookies(this.config.cupsWebUrl)).find((cookie) => cookie.key === 'csrf_token')?.value;
-  }
-
-  private async doLogin(): Promise<void> {
-    const response = await this.http.post('/api/login', { username: this.credentials.username, password: this.credentials.password });
-    if (response.status < 200 || response.status >= 300) throw new SubmitFailedError(`cups-web 登录失败（HTTP ${response.status}）`);
-  }
 }
 
-/** 每个 cups-web 用户使用独立 Cookie Jar，避免登录态交叉导致历史记录归属错误。 */
+/** 每位微信用户使用其 cups-web 用户签发的 API Key，记录和 CUPS 作业归属天然隔离。 */
 export class CupsWebClient implements PrinterSubmitter, PrintHistoryReader {
   private readonly sessions = new Map<string, CupsWebSession>();
 
@@ -131,11 +77,11 @@ export class CupsWebClient implements PrinterSubmitter, PrintHistoryReader {
   }
 
   private sessionFor(userId: string): CupsWebSession {
-    const credentials = this.config.cupsCredentialsByExternalUser.get(userId);
-    if (!credentials) throw new SubmitFailedError('未配置该微信用户对应的 cups-web 凭据');
+    const apiKey = this.config.cupsApiKeysByExternalUser.get(userId);
+    if (!apiKey) throw new SubmitFailedError('未配置该微信用户对应的 cups-web API Key');
     let session = this.sessions.get(userId);
     if (!session) {
-      session = new CupsWebSession(this.config, credentials);
+      session = new CupsWebSession(this.config, apiKey);
       this.sessions.set(userId, session);
     }
     return session;
